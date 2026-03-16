@@ -1,0 +1,27 @@
+export const lunchTemplate = `
+<section class="card lunch-card">
+  <div class="lunch-header">
+    <div>
+      <h2>점메추</h2>
+      <p class="hint">현재 위치를 기준으로 근처 식당을 불러오고, 선택한 카테고리에 맞는 곳만 보여줘</p>
+    </div>
+    <div class="lunch-actions">
+      <button id="lunchFavoritesOnlyBtn" class="btn btn-muted">즐겨찾기만 보기</button>
+      <button id="lunchRefreshBtn" class="btn btn-muted">위치 새로고침</button>
+      <button id="lunchLocateBtn" class="btn btn-primary">현재 위치로 불러오기</button>
+    </div>
+  </div>
+  <div id="lunchLocationStatus" class="lunch-location-status">위치 권한을 허용하면 근처 식당을 실시간으로 불러와요.</div>
+  <div class="lunch-filter-row">
+    <!-- Kakao Local API key input can be restored here later if the project switches back from Overpass. -->
+    <label class="field lunch-search-field">
+      <span>결과 내 검색</span>
+      <input id="lunchSearchInput" type="search" placeholder="식당명, 메뉴, 주소로 검색" />
+    </label>
+  </div>
+  <div id="lunchCategoryBar" class="lunch-category-bar" role="tablist" aria-label="점심 카테고리"></div>
+  <div id="lunchResultMeta" class="lunch-result-meta"></div>
+  <div id="lunchList" class="lunch-list"></div>
+  <div id="lunchPagination" class="lunch-pagination"></div>
+</section>
+`;

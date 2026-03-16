@@ -1,0 +1,42 @@
+<!DOCTYPE html>
+<html lang="ko">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>office-lab</title>
+  <link rel="stylesheet" href="./styles.css" />
+</head>
+<body>
+  <div class="app-shell">
+    <header class="hero">
+      <div class="hero-copy">
+        <h1><span id="heroMark" class="hero-mark">🐴</span> 직딩심체요절</h1>
+        <p>10년차 개발자의 오피스 연구실</p>
+      </div>
+      <aside id="weatherWidget" class="weather-widget" aria-live="polite">
+        <div class="weather-widget-text">
+          <div class="weather-label">오늘 날씨</div>
+          <div id="weatherSummary" class="weather-summary">위치 확인 중...</div>
+        </div>
+        <div class="weather-widget-visual">
+          <img id="weatherIcon" class="weather-icon" alt="" />
+          <div id="weatherTemp" class="weather-temp">--°</div>
+          <button id="weatherRefreshBtn" type="button" class="weather-refresh-btn" aria-label="날씨 새로고침">↻</button>
+        </div>
+      </aside>
+    </header>
+
+    <nav class="tab-bar">
+      <button class="tab-btn active" data-tab="tracker">슬기로운 월루생활</button>
+      <button class="tab-btn" data-tab="income">연봉 실수령액표</button>
+      <button class="tab-btn" data-tab="lunch">점메추</button>
+      <button class="tab-btn" data-tab="fortune">오늘의 운세</button>
+      <button class="tab-btn" data-tab="ladder">사다리게임</button>
+    </nav>
+
+    <main id="tabHost" class="page"></main>
+  </div>
+
+  <script src="./app/runtime.js"></script>
+</body>
+</html>

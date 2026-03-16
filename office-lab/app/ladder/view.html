@@ -1,0 +1,31 @@
+<section class="card ladder-card">
+  <div class="ladder-header">
+    <div>
+      <h2>사다리게임</h2>
+      <p class="hint">커피내기나 점심내기처럼 빠르게 돌릴 수 있는 직장인용 사다리게임.</p>
+    </div>
+    <div class="ladder-actions">
+      <button id="ladderGenerateBtn" class="btn btn-primary">새로 생성</button>
+    </div>
+  </div>
+
+  <div class="ladder-layout">
+    <section class="ladder-settings">
+      <label class="field">
+        <span>참가자 이름</span>
+        <textarea id="ladderNames" class="ladder-names" placeholder="한 줄에 한 명씩 입력&#10;예: 민수&#10;지연&#10;현우"></textarea>
+      </label>
+      <label class="field compact-field">
+        <span>가로줄 개수</span>
+        <input id="ladderBridgeCount" type="number" min="3" max="16" step="1" value="7" />
+      </label>
+      <div id="ladderStatus" class="ladder-status">참가자를 입력하고 새로 생성하면 시작돼요.</div>
+      <div id="ladderResult" class="ladder-result"></div>
+    </section>
+
+    <section class="ladder-board-card">
+      <div id="ladderBoard" class="ladder-board"></div>
+      <div id="ladderLegend" class="ladder-legend"></div>
+    </section>
+  </div>
+</section>
