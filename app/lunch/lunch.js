@@ -1,6 +1,6 @@
 import { lunchCategories } from "../core/data.js";
 
-const PAGE_SIZE = 10;
+const PAGE_SIZE = 12;
 const SEARCH_RADIUS_METERS = 1800;
 const OVERPASS_URL = "https://overpass-api.de/api/interpreter";
 
@@ -44,6 +44,46 @@ export function initLunchTab(root, { state, persist }) {
   let allPlaces = [];
   let didAutoLoad = false;
   let categoryBarInitialized = false;
+
+  function getFavoriteIconMarkup(active) {
+    return `
+      <svg viewBox="0 0 24 24" aria-hidden="true" focusable="false" class="lunch-favorite-icon">
+        <path
+          d="M12 3.8l2.35 4.76a1.4 1.4 0 0 0 1.05.77l5.25.76-3.8 3.71a1.4 1.4 0 0 0-.4 1.23l.9 5.23-4.7-2.47a1.4 1.4 0 0 0-1.3 0l-4.7 2.47.9-5.23a1.4 1.4 0 0 0-.4-1.23l-3.8-3.71 5.25-.76a1.4 1.4 0 0 0 1.05-.77Z"
+          ${active ? 'fill="currentColor" stroke="none"' : 'fill="none" stroke="currentColor" stroke-width="1.8" stroke-linejoin="round"'}
+        />
+      </svg>
+    `;
+  }
+
+  function escapeHtml(value) {
+    return String(value ?? "")
+      .replace(/&/g, "&amp;")
+      .replace(/</g, "&lt;")
+      .replace(/>/g, "&gt;")
+      .replace(/"/g, "&quot;")
+      .replace(/'/g, "&#39;");
+  }
+
+  function getRegisteredImageUrl(tags = {}) {
+    const directImage = [
+      tags.image,
+      tags["image:0"],
+      tags["contact:image"]
+    ].find((value) => /^https?:\/\//i.test(String(value || "").trim()));
+
+    if (directImage) return directImage;
+
+    const wikimediaCommons = String(tags.wikimedia_commons || "").trim();
+    if (wikimediaCommons) {
+      const fileName = wikimediaCommons.replace(/^File:/i, "").replace(/ /g, "_");
+      if (fileName) {
+        return `https://commons.wikimedia.org/wiki/Special:FilePath/${encodeURIComponent(fileName)}`;
+      }
+    }
+
+    return "";
+  }
 
   function ensureLunchState() {
     state.lunchCategory = lunchCategories.includes(state.lunchCategory) ? state.lunchCategory : CATEGORY_KOREAN;
@@ -153,6 +193,42 @@ export function initLunchTab(root, { state, persist }) {
 
   function getOpenStreetMapLink(place) {
     return `https://www.openstreetmap.org/?mlat=${place.lat}&mlon=${place.lon}#map=18/${place.lat}/${place.lon}`;
+  }
+
+  function closeDetailModal() {
+    els.detailModal.classList.remove("open");
+    els.detailModal.setAttribute("aria-hidden", "true");
+  }
+
+  function openDetailModal(placeId) {
+    const place = allPlaces.find((item) => item.id === placeId);
+    if (!place) return;
+
+    const metaItems = [
+      getPlaceCategoryLabel(place),
+      place.cuisineLabel || "정보 없음",
+      formatDistance(place.distanceMeters),
+      place.tags.amenity || "eatery"
+    ];
+
+    const imageUrl = getRegisteredImageUrl(place.tags);
+    if (imageUrl) {
+      els.detailImage.hidden = false;
+      els.detailImage.src = imageUrl;
+      els.detailImage.alt = `${place.tags.name} 대표 이미지`;
+    } else {
+      els.detailImage.hidden = true;
+      els.detailImage.removeAttribute("src");
+      els.detailImage.removeAttribute("alt");
+    }
+    els.detailTitle.textContent = place.tags.name || "식당 상세";
+    els.detailAddress.textContent = place.address || "주소 정보 없음";
+    els.detailMeta.innerHTML = metaItems
+      .map((item) => `<span>${escapeHtml(item)}</span>`)
+      .join("");
+    els.detailMapLink.href = getOpenStreetMapLink(place);
+    els.detailModal.classList.add("open");
+    els.detailModal.setAttribute("aria-hidden", "false");
   }
 
   function mapElementToPlace(element) {
@@ -415,6 +491,9 @@ out center tags;
 
     els.list.innerHTML = visible.map((place) => `
       <article class="lunch-item${isFavorite(place.id) ? " favorite" : ""}" data-place-id="${place.id}">
+        ${getRegisteredImageUrl(place.tags)
+          ? `<img class="lunch-thumb" src="${getRegisteredImageUrl(place.tags)}" alt="${place.tags.name} 대표 이미지" loading="lazy" />`
+          : ""}
         <div class="lunch-item-top">
           <div>
             <h3>${place.tags.name}</h3>
@@ -422,7 +501,7 @@ out center tags;
           </div>
           <div class="lunch-item-actions">
             <span class="lunch-badge">${state.lunchCategory === CATEGORY_ALL ? getPlaceCategoryLabel(place) : state.lunchCategory}</span>
-            <button type="button" class="lunch-favorite-btn${isFavorite(place.id) ? " active" : ""}" data-favorite-id="${place.id}" aria-label="즐겨찾기">${isFavorite(place.id) ? "★" : "☆"}</button>
+            <button type="button" class="lunch-favorite-btn${isFavorite(place.id) ? " active" : ""}" data-favorite-id="${place.id}" aria-label="즐겨찾기">${getFavoriteIconMarkup(isFavorite(place.id))}</button>
           </div>
         </div>
         <p class="lunch-copy">${place.address}</p>
@@ -433,11 +512,17 @@ out center tags;
         <div class="lunch-links">
           <a href="${getOpenStreetMapLink(place)}" target="_blank" rel="noreferrer">지도 보기</a>
         </div>
+        <div class="lunch-card-footer">
+          <button type="button" class="btn btn-muted lunch-detail-btn" data-detail-id="${place.id}">상세보기</button>
+        </div>
       </article>
     `).join("");
 
     els.list.querySelectorAll("[data-favorite-id]").forEach((button) => {
       button.addEventListener("click", () => toggleFavorite(button.dataset.favoriteId));
+    });
+    els.list.querySelectorAll("[data-detail-id]").forEach((button) => {
+      button.addEventListener("click", () => openDetailModal(button.dataset.detailId));
     });
 
     animateListReorder(previousPositions);
@@ -517,6 +602,13 @@ out center tags;
     activePage = 1;
     persist();
     render();
+  });
+  els.detailCloseBtn.addEventListener("click", closeDetailModal);
+  els.detailModal.addEventListener("click", (event) => {
+    if (event.target === els.detailModal) closeDetailModal();
+  });
+  document.addEventListener("keydown", (event) => {
+    if (event.key === "Escape") closeDetailModal();
   });
   els.searchInput.addEventListener("input", (event) => {
     state.lunchSearchQuery = event.target.value;

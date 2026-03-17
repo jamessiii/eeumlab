@@ -1,9 +1,9 @@
 ﻿(function () {
 'use strict';
 // FILE: .\v1.4\app\core\data.js
-const PAID_WORK_SECONDS_PER_DAY = 7 * 60 * 60;
+const PAID_WORK_SECONDS_PER_DAY = 8 * 60 * 60;
 const DEFAULT_START = "09:00";
-const DEFAULT_END = "17:00";
+const DEFAULT_END = "18:00";
 const fixedSolarHolidays = {
   "01-01": "신정",
   "03-01": "삼일절",
@@ -91,9 +91,20 @@ const defaultState = {
   lunchKakaoApiKey: "",
   lunchFavorites: [],
   lunchFavoritesOnly: false,
+  lunchStartTime: "",
+  lunchEndTime: "",
   lunchLastFetchAt: "",
   lunchLastLocation: null,
   lunchCachedPlaces: [],
+  todoItems: [],
+  todoViewMode: "list",
+  todoCalendarMode: "month",
+  todoSelectedDate: getDateKey(new Date()),
+  todoShowFavoritesOnly: false,
+  todoShowCompleted: true,
+  bookmarks: [],
+  bookmarkViewMode: "card",
+  bookmarkLabels: [],
   fortuneSelectedZodiac: "",
   ladderNames: "민수\n지연\n현우\n서연",
   ladderPlayerCount: 4,
@@ -339,6 +350,83 @@ function bindTabButtons(onSelect) {
   });
 }
 
+function setTabAlert(tabId, alertKey, active) {
+  const button = document.querySelector(`.tab-btn[data-tab="${tabId}"]`);
+  if (!button) return;
+  const className = `tab-alert-${alertKey}`;
+  button.classList.toggle(className, Boolean(active));
+}
+
+function setGlobalLunchAlert(active, text = "점심시간 임박!!") {
+  const badge = document.getElementById("globalLunchAlert");
+  if (!badge) return;
+  badge.hidden = !active;
+  badge.classList.toggle("active", Boolean(active));
+  badge.style.display = active ? "inline-flex" : "none";
+  badge.textContent = text;
+}
+
+function ensureGlobalTodoAlertBadge() {
+  let badge = document.getElementById("globalTodoAlert");
+  const title = document.querySelector(".hero-copy h1");
+  if (!title) return null;
+  if (!badge) {
+    badge = document.createElement("span");
+    badge.id = "globalTodoAlert";
+    badge.className = "global-todo-alert";
+    badge.hidden = true;
+    title.appendChild(badge);
+  } else if (!title.contains(badge)) {
+    title.appendChild(badge);
+  }
+  return badge;
+}
+
+function setGlobalTodoAlert(text = "", tone = "") {
+  const badge = ensureGlobalTodoAlertBadge();
+  if (!badge) return;
+  badge.hidden = !text;
+  badge.textContent = text;
+  badge.dataset.tone = tone || "";
+  badge.classList.toggle("active", Boolean(text));
+}
+
+function placeGlobalLunchAlertNearTitle() {
+  const badge = document.getElementById("globalLunchAlert");
+  const title = document.querySelector(".hero-copy h1");
+  if (!badge || !title || title.contains(badge)) return;
+  title.appendChild(document.createTextNode(" "));
+  title.appendChild(badge);
+}
+
+function moveHomeGuideButtonToTabBar() {
+  const button = document.getElementById("setHomeGuideBtn");
+  const tabBar = document.querySelector(".tab-bar");
+  if (!button || !tabBar) return;
+  button.classList.add("tab-home-btn");
+  tabBar.appendChild(button);
+}
+
+function bindGlobalAlertBadges(tabs, state, persist) {
+  const goToTab = (tabId) => {
+    state.activeTab = tabId;
+    persist();
+    setActiveTab(tabs, tabId);
+  };
+
+  document.getElementById("globalLunchAlert")?.addEventListener("click", () => {
+    goToTab("lunch");
+    const lunchTab = tabs.find((tab) => tab.id === "lunch");
+    lunchTab?.controller?.focusAlert?.();
+  });
+
+  document.getElementById("globalTodoAlert")?.addEventListener("click", () => {
+    goToTab("todo");
+    const todoTab = tabs.find((tab) => tab.id === "todo");
+    todoTab?.controller?.focusAlert?.();
+  });
+}
+
 
 // FILE: .\v1.4\app\tracker\view.js
 const trackerTemplate = `
@@ -362,19 +450,27 @@ const trackerTemplate = `
         <input id="monthlyGoal" type="text" placeholder="예: 250만 원 모으기" />
       </label>
     </div>
-    <div class="button-row">
-      <button id="startBtn" class="btn btn-start">지금 출근</button>
-      <button id="stopBtn" class="btn btn-stop">지금 퇴근</button>
-      <button id="editTodayBtn" class="btn btn-primary">오늘 기록 수정</button>
+    <div class="form-grid tracker-time-grid">
+      <label class="field">
+        <span>출근시간</span>
+        <input id="todayStartTime" type="time" />
+      </label>
+      <label class="field">
+        <span>퇴근시간</span>
+        <input id="todayEndTime" type="time" />
+      </label>
+      <div class="field tracker-action-field">
+        <button id="workToggleBtn" class="btn btn-start tracker-action-btn">지금 출근</button>
+      </div>
     </div>
     <div class="summary-grid">
       <article class="summary-card">
-        <div class="summary-label">오늘 번 돈</div>
+        <div class="summary-label">오늘 회사에 끼친 손해</div>
         <div id="todayMoney" class="summary-value">₩ 0</div>
         <div id="todaySub" class="summary-sub">오늘 근무시간 00:00:00</div>
       </article>
       <article class="summary-card">
-        <div class="summary-label">이번 달 번 돈</div>
+        <div class="summary-label">이번 달 회사에 끼친 손해</div>
         <div id="monthMoney" class="summary-value">₩ 0</div>
         <div id="monthSub" class="summary-sub">완료된 근무일 0일 / 0일</div>
       </article>
@@ -401,7 +497,7 @@ const trackerTemplate = `
       <span class="status-dot"></span>
       <span id="statusText">퇴근 상태</span>
     </div>
-    <p class="hint">하루 8시간 근무, 점심 1시간 제외 기준으로 실제 반영 시급은 하루 7시간으로 계산돼.</p>
+    <p class="hint">하루 8시간 근무, 점심 1시간 제외 기준으로 실제 반영 시급은 하루 8시간으로 계산돼.</p>
   </section>
   <aside class="card calendar-card">
     <div class="calendar-header">
@@ -471,6 +567,17 @@ const trackerTemplate = `
     </div>
   </section>
 </div>
+<div id="workConfirmModal" class="tracker-confirm-modal" aria-hidden="true">
+  <div class="tracker-confirm-panel">
+    <div class="tracker-confirm-kicker">출퇴근 확인</div>
+    <h3 id="workConfirmTitle" class="tracker-confirm-title">처리할까요?</h3>
+    <p id="workConfirmText" class="tracker-confirm-text"></p>
+    <div class="tracker-confirm-actions">
+      <button id="workConfirmCancelBtn" type="button" class="btn btn-muted">취소</button>
+      <button id="workConfirmOkBtn" type="button" class="btn btn-primary">확인</button>
+    </div>
+  </div>
+</div>
 <div id="dayModal" class="modal" aria-hidden="true">
   <div class="modal-panel">
     <div class="modal-header">
@@ -524,9 +631,9 @@ function initTrackerTab(root, { state, persist }) {
     salaryAppliedToast: $("#salaryAppliedToast", root),
     monthlyGoal: $("#monthlyGoal", root),
     leaveAllowance: $("#leaveAllowance", root),
-    startBtn: $("#startBtn", root),
-    stopBtn: $("#stopBtn", root),
-    editTodayBtn: $("#editTodayBtn", root),
+    workToggleBtn: $("#workToggleBtn", root),
+    todayStartTime: $("#todayStartTime", root),
+    todayEndTime: $("#todayEndTime", root),
     openIncomeTabBtn: $("#openIncomeTabBtn", root),
     todayMoney: $("#todayMoney", root),
     monthMoney: $("#monthMoney", root),
@@ -550,6 +657,11 @@ function initTrackerTab(root, { state, persist }) {
     todayMonthBtn: $("#todayMonthBtn", root),
     nextMonthBtn: $("#nextMonthBtn", root),
     workLogBody: $("#workLogBody", root),
+    workConfirmModal: $("#workConfirmModal", root),
+    workConfirmTitle: $("#workConfirmTitle", root),
+    workConfirmText: $("#workConfirmText", root),
+    workConfirmCancelBtn: $("#workConfirmCancelBtn", root),
+    workConfirmOkBtn: $("#workConfirmOkBtn", root),
     modal: $("#dayModal", root),
     modalTitle: $("#modalTitle", root),
     closeModalBtn: $("#closeModalBtn", root),
@@ -573,6 +685,8 @@ function initTrackerTab(root, { state, persist }) {
   let deferSalaryDrivenSummaryAnimation = false;
   let pendingSummaryTargets = null;
   let isWaitingForSalaryFeedback = false;
+  let forceSummaryTransition = false;
+  let pendingWorkAction = null;
 
   function cloneEntry(entry = {}) {
     return {
@@ -591,10 +705,52 @@ function initTrackerTab(root, { state, persist }) {
     return state.entries[dateKey];
   }
 
+  function formatTimeValue(date) {
+    return `${pad(date.getHours())}:${pad(date.getMinutes())}`;
+  }
+
+  function getEntryStartDate(entry, date = getToday()) {
+    if (entry.liveStartTimestamp) {
+      return new Date(entry.liveStartTimestamp);
+    }
+    const startSeconds = timeToSeconds(entry.startTime);
+    if (startSeconds == null) return null;
+    return new Date(
+      date.getFullYear(),
+      date.getMonth(),
+      date.getDate(),
+      Math.floor(startSeconds / 3600),
+      Math.floor((startSeconds % 3600) / 60),
+      0,
+      0
+    );
+  }
+
+  function getAutoStopDate(entry, date = getToday()) {
+    const startDate = getEntryStartDate(entry, date);
+    if (!startDate) return null;
+    return new Date(startDate.getTime() + (PAID_WORK_SECONDS_PER_DAY + 60 * 60) * 1000);
+  }
+  function isLiveWorkSession(entry, date = getToday()) {
+    if (!isSameDay(date, getToday())) return false;
+    return Boolean((entry.running || entry.liveStartTimestamp || entry.startTime) && !entry.endTime);
+  }
+
   function syncInputsFromState() {
     els.monthlySalary.value = formatNumber(state.monthlySalary);
     els.monthlyGoal.value = state.monthlyGoal;
     els.leaveAllowance.value = state.leaveAllowance;
+  }
+
+  function syncTodayTimeInputs(force = false) {
+    const todayEntry = getEntry(getDateKey(getToday()));
+    const activeElement = document.activeElement;
+    if (force || activeElement !== els.todayStartTime) {
+      els.todayStartTime.value = todayEntry.startTime || "";
+    }
+    if (force || activeElement !== els.todayEndTime) {
+      els.todayEndTime.value = todayEntry.endTime || "";
+    }
   }
 
   function syncStateFromInputs() {
@@ -624,7 +780,7 @@ function initTrackerTab(root, { state, persist }) {
     return 1 - 2 ** (-10 * progress);
   }
 
-  function animateSummaryMoneyFields(targets) {
+  function animateSummaryMoneyFields(targets, duration = 1900) {
     const currentValues = {
       todayMoney: Number(els.todayMoney.dataset.value || 0),
       monthMoney: Number(els.monthMoney.dataset.value || 0),
@@ -636,7 +792,6 @@ function initTrackerTab(root, { state, persist }) {
     if (summaryAnimationFrame) cancelAnimationFrame(summaryAnimationFrame);
     isSummaryAnimating = true;
     const startTime = performance.now();
-    const duration = 1900;
 
     const step = (now) => {
       const progress = Math.min(1, (now - startTime) / duration);
@@ -763,7 +918,7 @@ function initTrackerTab(root, { state, persist }) {
     return businessDays > 0 ? state.monthlySalary / businessDays : 0;
   };
 
-  const getHourlyWage = () => getDailyWage() / 7;
+  const getHourlyWage = () => getDailyWage() / (PAID_WORK_SECONDS_PER_DAY / 3600);
   const getPerSecondWage = () => getDailyWage() / PAID_WORK_SECONDS_PER_DAY;
 
   function getDayStatus(date, entry) {
@@ -772,7 +927,7 @@ function initTrackerTab(root, { state, persist }) {
     if (entry.leaveType === "full") return isFuture(date) ? "휴가 예정" : "휴가";
     if (entry.leaveType === "half") return isFuture(date) ? "반차 예정" : "반차";
     if (entry.leaveType === "quarter") return isFuture(date) ? "반반차 예정" : "반반차";
-    if (entry.running && isSameDay(date, getToday())) return "출근 중";
+    if (isLiveWorkSession(entry, date)) return "근무 중";
     if (isPast(date)) return "정상근무";
     if (isSameDay(date, getToday())) return "오늘";
     return "예정";
@@ -794,12 +949,13 @@ function initTrackerTab(root, { state, persist }) {
         ? computeWorkedSecondsFromTimes(entry.startTime || DEFAULT_START, entry.endTime || DEFAULT_END)
         : PAID_WORK_SECONDS_PER_DAY;
     } else if (isSameDay(date, getToday())) {
-      if (entry.running) {
-        const startSeconds = timeToSeconds(entry.startTime);
-        if (startSeconds != null) {
+      if (isLiveWorkSession(entry, date)) {
+        const startDate = getEntryStartDate(entry, date);
+        if (startDate) {
           const now = getNow();
-          const start = new Date(now.getFullYear(), now.getMonth(), now.getDate(), Math.floor(startSeconds / 3600), Math.floor((startSeconds % 3600) / 60), 0, 0);
-          const raw = Math.floor((now.getTime() - start.getTime()) / 1000);
+          const autoStopDate = getAutoStopDate(entry, date);
+          const effectiveNow = autoStopDate ? new Date(Math.min(now.getTime(), autoStopDate.getTime())) : now;
+          const raw = Math.floor((effectiveNow.getTime() - startDate.getTime()) / 1000);
           const lunchDeduction = raw >= 4 * 3600 ? 3600 : 0;
           paidSeconds = Math.max(0, Math.min(PAID_WORK_SECONDS_PER_DAY, raw - lunchDeduction));
         }
@@ -852,6 +1008,7 @@ function initTrackerTab(root, { state, persist }) {
   function renderSummary() {
     if (autoStopWorkIfComplete()) return;
     const today = getToday();
+    const todayEntry = getEntry(getDateKey(today));
     const todayResult = getDayResult(today);
     const monthSummary = getMonthSummary(today.getFullYear(), today.getMonth());
     const businessDays = getBusinessDaysInMonth(today.getFullYear(), today.getMonth());
@@ -866,6 +1023,19 @@ function initTrackerTab(root, { state, persist }) {
       dailyValue: getDailyWage()
     };
 
+    const currentAnimatedValues = {
+      todayMoney: Number(els.todayMoney.dataset.value || 0),
+      monthMoney: Number(els.monthMoney.dataset.value || 0),
+      perSecondValue: Number(els.perSecondValue.dataset.value || 0),
+      hourlyValue: Number(els.hourlyValue.dataset.value || 0),
+      dailyValue: Number(els.dailyValue.dataset.value || 0)
+    };
+    const hasLiveTickChange = isLiveWorkSession(todayEntry)
+      && (
+        Math.abs(currentAnimatedValues.todayMoney - moneyTargets.todayMoney) >= 1
+        || Math.abs(currentAnimatedValues.monthMoney - moneyTargets.monthMoney) >= 1
+      );
+
     if (salaryChanged) {
       if (deferSalaryDrivenSummaryAnimation || isWaitingForSalaryFeedback) {
         pendingSummaryTargets = moneyTargets;
@@ -873,6 +1043,11 @@ function initTrackerTab(root, { state, persist }) {
         lastAnimatedSalary = state.monthlySalary;
         animateSummaryMoneyFields(moneyTargets);
       }
+    } else if (forceSummaryTransition) {
+      forceSummaryTransition = false;
+      animateSummaryMoneyFields(moneyTargets);
+    } else if (hasLiveTickChange) {
+      animateSummaryMoneyFields(moneyTargets, 650);
     } else if (!isSummaryAnimating) {
       els.todayMoney.dataset.value = String(moneyTargets.todayMoney);
       els.monthMoney.dataset.value = String(moneyTargets.monthMoney);
@@ -895,7 +1070,9 @@ function initTrackerTab(root, { state, persist }) {
     els.leaveRemainingValue.textContent = formatLeaveDays(leaveSummary.remaining);
     els.leaveMonthUsedValue.textContent = formatLeaveDays(leaveSummary.monthUsed);
     els.leaveMonthUsedSub.textContent = `${state.calendarYear}년 ${state.calendarMonth + 1}월 기준`;
+    syncTodayTimeInputs();
     updateStatusPill();
+    updateWorkToggleButton();
   }
 
   function updateStatusPill() {
@@ -905,7 +1082,7 @@ function initTrackerTab(root, { state, persist }) {
     if (entry.leaveType !== "none") {
       els.statusPill.classList.add("leave");
       els.statusText.textContent = result.status;
-    } else if (entry.running) {
+    } else if (isLiveWorkSession(entry)) {
       els.statusPill.classList.add("working");
       els.statusText.textContent = "출근 상태";
     } else if (result.paidSeconds >= PAID_WORK_SECONDS_PER_DAY) {
@@ -915,6 +1092,34 @@ function initTrackerTab(root, { state, persist }) {
       els.statusPill.classList.add("off");
       els.statusText.textContent = "퇴근 상태";
     }
+  }
+
+  function updateWorkToggleButton() {
+    const entry = getEntry(getDateKey(getToday()));
+    const result = getDayResult(getToday());
+    const button = els.workToggleBtn;
+    if (!button) return;
+    button.disabled = false;
+    button.classList.remove("btn-start", "btn-stop", "btn-muted");
+
+    if (isLiveWorkSession(entry)) {
+      button.textContent = "지금 퇴근";
+      button.classList.add("btn-stop");
+      button.dataset.action = "stop";
+      return;
+    }
+
+    if (result.paidSeconds >= PAID_WORK_SECONDS_PER_DAY) {
+      button.textContent = "오늘 근무 완료";
+      button.classList.add("btn-muted");
+      button.dataset.action = "done";
+      button.disabled = true;
+      return;
+    }
+
+    button.textContent = "지금 출근";
+    button.classList.add("btn-start");
+    button.dataset.action = "start";
   }
 
   function renderCalendar() {
@@ -948,9 +1153,9 @@ function initTrackerTab(root, { state, persist }) {
       else if (result.entry.leaveType === "full") dayEl.classList.add("leave-full");
       else if (result.paidSeconds > 0) dayEl.classList.add("worked");
 
-      const tag = result.weekend ? "주말" : result.holiday ? getHolidayLabel(date, result.entry) || "공휴일" : result.entry.leaveType === "full" ? (isFuture(date) ? "휴가 예정" : "휴가") : result.entry.leaveType === "half" ? (isFuture(date) ? "반차 예정" : "반차") : result.entry.leaveType === "quarter" ? (isFuture(date) ? "반반차 예정" : "반반차") : result.entry.running ? "출근 중" : result.paidSeconds > 0 ? "근무 반영" : "";
-      const tagClass = result.weekend ? "tag-weekend" : result.holiday ? "tag-holiday" : result.entry.leaveType === "full" ? "tag-leave-full" : result.entry.leaveType === "half" ? "tag-leave-half" : result.entry.leaveType === "quarter" ? "tag-leave-quarter" : result.entry.running ? "tag-running" : result.paidSeconds > 0 ? "tag-worked" : "";
-      const timeText = result.entry.startTime || result.entry.endTime ? `${result.entry.startTime || "--:--"} ~ ${result.entry.endTime || (result.entry.running ? "진행중" : "--:--")}` : "";
+      const tag = result.weekend ? "주말" : result.holiday ? getHolidayLabel(date, result.entry) || "공휴일" : result.entry.leaveType === "full" ? (isFuture(date) ? "휴가 예정" : "휴가") : result.entry.leaveType === "half" ? (isFuture(date) ? "반차 예정" : "반차") : result.entry.leaveType === "quarter" ? (isFuture(date) ? "반반차 예정" : "반반차") : isLiveWorkSession(result.entry, date) ? "근무 중" : result.paidSeconds > 0 ? "근무 반영" : "";
+      const tagClass = result.weekend ? "tag-weekend" : result.holiday ? "tag-holiday" : result.entry.leaveType === "full" ? "tag-leave-full" : result.entry.leaveType === "half" ? "tag-leave-half" : result.entry.leaveType === "quarter" ? "tag-leave-quarter" : isLiveWorkSession(result.entry, date) ? "tag-running" : result.paidSeconds > 0 ? "tag-worked" : "";
+      const timeText = result.entry.startTime || result.entry.endTime ? `${result.entry.startTime || "--:--"} ~ ${result.entry.endTime || (isLiveWorkSession(result.entry, date) ? "진행중" : "--:--")}` : "";
       dayEl.innerHTML = `
         <div class="day-date">${date.getDate()}</div>
         ${tag ? `<div class="day-tag ${tagClass}">${tag}</div>` : ""}
@@ -971,7 +1176,7 @@ function initTrackerTab(root, { state, persist }) {
       const date = new Date(year, month, day);
       if (isFuture(date)) continue;
       const result = getDayResult(date);
-      const hasWork = Boolean(result.entry.running || result.entry.startTime || result.entry.endTime);
+      const hasWork = Boolean(isLiveWorkSession(result.entry, date) || result.entry.startTime || result.entry.endTime);
       const onClosedDay = result.weekend || result.holiday;
       const breakText = hasWork && getBreakSecondsForEntry(result.entry) > 0 ? formatTimeFromSeconds(getBreakSecondsForEntry(result.entry)) : "-";
       const timeText = onClosedDay && !hasWork ? "-" : formatTimeFromSeconds(result.paidSeconds);
@@ -982,7 +1187,7 @@ function initTrackerTab(root, { state, persist }) {
         <td class="${dateClass}">${date.getFullYear()}-${pad(date.getMonth() + 1)}-${pad(date.getDate())} (${getWeekdayLabel(date)})</td>
         <td>${result.status}</td>
         <td>${result.entry.startTime || "-"}</td>
-        <td>${result.entry.endTime || (result.entry.running ? "진행중" : "-")}</td>
+        <td>${result.entry.endTime || (isLiveWorkSession(result.entry, date) ? "진행중" : "-")}</td>
         <td>${breakText}</td>
         <td>${timeText}</td>
         <td>${moneyText}</td>
@@ -1042,6 +1247,70 @@ function initTrackerTab(root, { state, persist }) {
     persist();
     openDayModal(selectedDateKey);
   }
+  function closeWorkConfirmModal() {
+    pendingWorkAction = null;
+    els.workConfirmModal.classList.remove("open");
+    els.workConfirmModal.setAttribute("aria-hidden", "true");
+  }
+  function openWorkConfirmModal(action) {
+    pendingWorkAction = action;
+    const isStart = action === "start";
+    els.workConfirmTitle.textContent = isStart ? "출근 처리할까요?" : "퇴근 처리할까요?";
+    els.workConfirmText.textContent = isStart
+      ? "지금 시각 기준으로 출근 상태로 전환합니다."
+      : "지금 시각 기준으로 퇴근 상태로 전환합니다.";
+    els.workConfirmModal.classList.add("open");
+    els.workConfirmModal.setAttribute("aria-hidden", "false");
+  }
+  function confirmWorkAction() {
+    const action = pendingWorkAction;
+    closeWorkConfirmModal();
+    if (action === "start") {
+      startWorkNow();
+      return;
+    }
+    if (action === "stop") {
+      stopWorkNow();
+    }
+  }
+
+  function updateTodayTimesInline() {
+    const today = getToday();
+    const entry = getEntry(getDateKey(today));
+    entry.startTime = els.todayStartTime.value || "";
+    entry.endTime = els.todayEndTime.value || "";
+    if (isLiveWorkSession(entry, today)) {
+      if (!entry.startTime) {
+        const now = getNow();
+        entry.startTime = formatTimeValue(now);
+        entry.liveStartTimestamp = now.getTime();
+      } else {
+        const startSeconds = timeToSeconds(entry.startTime);
+        const startDate = startSeconds == null
+          ? null
+          : new Date(
+              today.getFullYear(),
+              today.getMonth(),
+              today.getDate(),
+              Math.floor(startSeconds / 3600),
+              Math.floor((startSeconds % 3600) / 60),
+              0,
+              0
+            );
+        entry.liveStartTimestamp = startDate ? startDate.getTime() : getNow().getTime();
+      }
+      if (entry.endTime) {
+        entry.running = false;
+        entry.liveStartTimestamp = null;
+      }
+    } else {
+      entry.liveStartTimestamp = null;
+    }
+    persist();
+    syncTodayTimeInputs(true);
+    forceSummaryTransition = true;
+    renderAll();
+  }
 
   function startWorkNow() {
     const entry = getEntry(getDateKey(getToday()));
@@ -1049,19 +1318,18 @@ function initTrackerTab(root, { state, persist }) {
     entry.leaveType = "none";
     entry.customHoliday = false;
     entry.running = true;
-    entry.liveStartTimestamp = Date.now();
-    if (!entry.startTime) entry.startTime = `${pad(now.getHours())}:${pad(now.getMinutes())}`;
+    entry.liveStartTimestamp = now.getTime();
+    if (!entry.startTime) entry.startTime = formatTimeValue(now);
     entry.endTime = "";
     persist();
     renderAll();
   }
 
-  function stopWorkNow() {
+  function stopWorkNow(stopDate = getNow()) {
     const entry = getEntry(getDateKey(getToday()));
-    const now = getNow();
     entry.running = false;
     entry.liveStartTimestamp = null;
-    entry.endTime = `${pad(now.getHours())}:${pad(now.getMinutes())}`;
+    entry.endTime = formatTimeValue(stopDate);
     if (!entry.startTime) entry.startTime = DEFAULT_START;
     persist();
     renderAll();
@@ -1069,10 +1337,21 @@ function initTrackerTab(root, { state, persist }) {
 
   function autoStopWorkIfComplete() {
     const entry = getEntry(getDateKey(getToday()));
-    if (!entry.running) return false;
-    if (getDayResult(getToday()).paidSeconds < PAID_WORK_SECONDS_PER_DAY) return false;
-    stopWorkNow();
+    if (!isLiveWorkSession(entry)) return false;
+    const autoStopDate = getAutoStopDate(entry, getToday());
+    if (!autoStopDate || getNow().getTime() < autoStopDate.getTime()) return false;
+    stopWorkNow(autoStopDate);
     return true;
+  }
+
+  function handleWorkToggle() {
+    if (els.workToggleBtn?.dataset.action === "stop") {
+      openWorkConfirmModal("stop");
+      return;
+    }
+    if (els.workToggleBtn?.dataset.action === "start") {
+      openWorkConfirmModal("start");
+    }
   }
 
   function renderAll() {
@@ -1090,9 +1369,16 @@ function initTrackerTab(root, { state, persist }) {
     el.addEventListener("input", handler);
     el.addEventListener("change", handler);
   });
-  els.startBtn.addEventListener("click", startWorkNow);
-  els.stopBtn.addEventListener("click", stopWorkNow);
-  els.editTodayBtn.addEventListener("click", () => openDayModal(getDateKey(getToday())));
+  [els.todayStartTime, els.todayEndTime].forEach((el) => {
+    el.addEventListener("change", updateTodayTimesInline);
+    el.addEventListener("blur", updateTodayTimesInline);
+  });
+  els.workToggleBtn.addEventListener("click", handleWorkToggle);
+  els.workConfirmCancelBtn.addEventListener("click", closeWorkConfirmModal);
+  els.workConfirmOkBtn.addEventListener("click", confirmWorkAction);
+  els.workConfirmModal.addEventListener("click", (event) => {
+    if (event.target === els.workConfirmModal) closeWorkConfirmModal();
+  });
   els.openIncomeTabBtn.addEventListener("click", () => {
     document.querySelector('.tab-btn[data-tab="income"]')?.click();
   });
@@ -1129,10 +1415,15 @@ function initTrackerTab(root, { state, persist }) {
   els.clearDayBtn.addEventListener("click", clearDaySettings);
   els.deleteNoteBtn.addEventListener("click", clearDayNote);
   document.addEventListener("keydown", (event) => {
+    if (event.key === "Escape" && els.workConfirmModal.classList.contains("open")) {
+      closeWorkConfirmModal();
+      return;
+    }
     if (event.key === "Escape") closeDayModal();
   });
 
   syncInputsFromState();
+  syncTodayTimeInputs(true);
   renderAll();
   const timer = setInterval(renderSummary, 1000);
   return {
@@ -1377,38 +1668,2197 @@ function initIncomeTab(root, { state, persist }) {
 }
 
 
+// FILE: .\v1.4\app\bookmarks\view.js
+const bookmarksTemplate = `
+<section class="card bookmarks-card">
+  <div class="bookmarks-header">
+    <div>
+      <h2>북마크</h2>
+      <p class="hint">브라우저 북마크를 드래그 앤 드롭으로 가져와 추가할 수 있어요!</p>
+    </div>
+    <div class="bookmarks-header-actions">
+      <button id="bookmarkManageLabelsBtn" type="button" class="btn btn-muted bookmark-manage-labels-btn">라벨 관리</button>
+      <div class="bookmarks-view-toggle" aria-label="북마크 보기 방식">
+        <button id="bookmarkCardViewBtn" type="button" class="bookmark-view-btn" aria-pressed="true" title="카드로 보기">◫</button>
+        <button id="bookmarkListViewBtn" type="button" class="bookmark-view-btn" aria-pressed="false" title="목록으로 보기">☰</button>
+      </div>
+    </div>
+  </div>
+  <div class="bookmark-drop-hint" aria-hidden="true">
+    <strong>북마크 추가!</strong>
+    <span>링크나 HTML을 여기 놓으면 새 북마크로 추가할 수 있어요.</span>
+  </div>
+  <div id="bookmarkList" class="bookmark-list"></div>
+  <div id="bookmarkModal" class="bookmark-modal" aria-hidden="true">
+    <div class="bookmark-modal-panel">
+      <button id="bookmarkModalCloseBtn" type="button" class="btn btn-muted bookmark-modal-close" aria-label="북마크 팝업 닫기">×</button>
+      <div class="bookmark-modal-kicker">북마크 설정</div>
+      <h3 id="bookmarkModalTitle" class="bookmark-modal-title">북마크 추가</h3>
+      <div class="form-grid">
+        <label class="field">
+          <span>이름</span>
+          <input id="bookmarkNameInput" type="text" placeholder="예: 네이버 메일" />
+        </label>
+        <label class="field">
+          <span>주소</span>
+          <input id="bookmarkUrlInput" type="url" placeholder="https://..." />
+        </label>
+      </div>
+      <div class="form-grid">
+        <label class="field">
+          <span>대표 이미지 URL</span>
+          <input id="bookmarkImageUrlInput" type="url" placeholder="https://.../image.png" />
+        </label>
+        <label class="field bookmark-color-field">
+          <span>대표 색상</span>
+          <div class="bookmark-color-control">
+            <input id="bookmarkColorInput" class="bookmark-color-input" type="color" value="#93c5fd" />
+            <button id="bookmarkColorResetBtn" type="button" class="bookmark-color-reset">기본색</button>
+          </div>
+        </label>
+      </div>
+      <label class="field">
+        <span>메모</span>
+        <input id="bookmarkNoteInput" type="text" placeholder="예: 회사 메일 확인" />
+      </label>
+      <label class="field">
+        <span>라벨</span>
+        <div id="bookmarkLabelPicker" class="bookmark-label-picker"></div>
+      </label>
+      <div id="bookmarkModalError" class="bookmark-modal-error" aria-live="polite"></div>
+      <div class="button-row">
+        <button id="bookmarkSaveBtn" type="button" class="btn btn-primary">저장</button>
+        <button id="bookmarkDeleteBtn" type="button" class="btn btn-stop">삭제</button>
+      </div>
+    </div>
+  </div>
+  <div id="bookmarkDeleteConfirmModal" class="bookmark-delete-confirm-modal" aria-hidden="true">
+    <div class="bookmark-delete-confirm-panel">
+      <div class="bookmark-modal-kicker">북마크 삭제</div>
+      <h3 class="bookmark-delete-confirm-title">이 북마크를 삭제할까요?</h3>
+      <p id="bookmarkDeleteConfirmText" class="bookmark-delete-confirm-text"></p>
+      <div class="button-row">
+        <button id="bookmarkDeleteConfirmCancelBtn" type="button" class="btn btn-muted">취소</button>
+        <button id="bookmarkDeleteConfirmOkBtn" type="button" class="btn btn-stop">삭제</button>
+      </div>
+    </div>
+  </div>
+  <div id="bookmarkLabelsModal" class="bookmark-modal" aria-hidden="true">
+    <div class="bookmark-modal-panel">
+      <button id="bookmarkLabelsModalCloseBtn" type="button" class="btn btn-muted bookmark-modal-close" aria-label="라벨 관리 팝업 닫기">×</button>
+      <div class="bookmark-modal-kicker">라벨 관리</div>
+      <h3 class="bookmark-modal-title">라벨과 색상 관리</h3>
+      <div id="bookmarkLabelsEditorList" class="bookmark-labels-editor-list"></div>
+      <div class="bookmark-labels-add-row">
+        <input id="bookmarkNewLabelNameInput" type="text" placeholder="새 라벨 이름" />
+        <input id="bookmarkNewLabelColorInput" class="bookmark-color-input" type="color" value="#60a5fa" />
+        <button id="bookmarkAddLabelBtn" type="button" class="btn btn-primary">추가</button>
+      </div>
+      <div id="bookmarkLabelsModalError" class="bookmark-modal-error" aria-live="polite"></div>
+    </div>
+  </div>
+</section>
+`;
+
+
+// FILE: .\v1.4\app\bookmarks\bookmarks.js
+const MAX_BOOKMARKS = 12;
+const DEFAULT_BOOKMARK_COLOR = "#93c5fd";
+const DEFAULT_BOOKMARKS = [
+  { id: "bookmark-default-naver", name: "네이버", url: "https://www.naver.com/", note: "포털", imageUrl: "", color: "", labels: ["포털"] },
+  { id: "bookmark-default-google", name: "구글", url: "https://www.google.com/", note: "검색", imageUrl: "", color: "", labels: ["검색"] }
+];
+const BOOKMARK_LABEL_COLOR_PALETTE = ["#60a5fa", "#34d399", "#f59e0b", "#f472b6", "#a78bfa", "#fb7185", "#2dd4bf", "#facc15"];
+function ensureBookmarksState(state) {
+  state.bookmarks = Array.isArray(state.bookmarks) ? state.bookmarks.filter((item) => item && typeof item === "object").slice(0, MAX_BOOKMARKS).map((item) => ({
+    id: String(item.id || `bookmark-${Date.now()}`),
+    name: String(item.name || "").trim(),
+    url: String(item.url || "").trim(),
+    note: String(item.note || "").trim(),
+    imageUrl: String(item.imageUrl || "").trim(),
+    color: String(item.color || "").trim(),
+    labels: normalizeBookmarkSelection(item.labels || item.tags)
+  })) : [];
+  state.bookmarkViewMode = state.bookmarkViewMode === "list" ? "list" : "card";
+  state.bookmarkLabels = normalizeBookmarkLabelDefinitions(state.bookmarkLabels, state.bookmarks, state.bookmarkLabelColors);
+}
+function normalizeBookmarkSelection(rawValue) {
+  const values = Array.isArray(rawValue) ? rawValue : String(rawValue || "").split(",");
+  return values.map((value) => String(value || "").trim()).filter(Boolean).filter((value, index, array) => array.indexOf(value) === index).slice(0, 3);
+}
+function normalizeBookmarkLabelDefinitions(rawValue, bookmarks = [], legacyColors = {}) {
+  const definitions = Array.isArray(rawValue) ? rawValue : [];
+  const map = new Map();
+  definitions.forEach((item) => {
+    const name = String(item?.name || "").trim();
+    if (!name) return;
+    map.set(name, {
+      name,
+      color: normalizeBookmarkColor(item?.color) || getAutoBookmarkLabelColor(name)
+    });
+  });
+  bookmarks.forEach((bookmark) => {
+    normalizeBookmarkSelection(bookmark.labels).forEach((name) => {
+      if (!map.has(name)) {
+        map.set(name, {
+          name,
+          color: normalizeBookmarkColor(legacyColors?.[name]) || getAutoBookmarkLabelColor(name)
+        });
+      }
+    });
+  });
+  Object.entries(legacyColors && typeof legacyColors === "object" ? legacyColors : {}).forEach(([name, color]) => {
+    const trimmed = String(name || "").trim();
+    const normalized = normalizeBookmarkColor(color);
+    if (!trimmed || !normalized) return;
+    map.set(trimmed, { name: trimmed, color: normalized });
+  });
+  return [...map.values()].slice(0, 24);
+}
+function renderBookmarkTagBadges(labels) {
+  const items = normalizeBookmarkSelection(labels);
+  if (!items.length) return "";
+  return `<div class="bookmark-tags">${items.map((label) => `<span class="bookmark-tag" style="${getBookmarkTagStyle(label, state.bookmarkLabels)}">${escapeHtml(label)}</span>`).join("")}</div>`;
+}
+function getBookmarkTagStyle(labelName, labelDefs = []) {
+  const label = labelDefs.find((item) => item.name === labelName);
+  return `--bookmark-tag-custom:${normalizeBookmarkColor(label?.color) || getAutoBookmarkLabelColor(labelName)};`;
+}
+function getAutoBookmarkLabelColor(label) {
+  let hash = 0;
+  String(label || "").split("").forEach((char) => {
+    hash = char.charCodeAt(0) + ((hash << 5) - hash);
+  });
+  return BOOKMARK_LABEL_COLOR_PALETTE[Math.abs(hash) % BOOKMARK_LABEL_COLOR_PALETTE.length];
+}
+function applyDefaultBookmarksIfEmpty(state) {
+  ensureBookmarksState(state);
+  if (state.bookmarks.length) return false;
+  state.bookmarks = DEFAULT_BOOKMARKS.map((item) => ({ ...item }));
+  return true;
+}
+function normalizeBookmarkUrl(rawValue) {
+  const trimmed = String(rawValue || "").trim();
+  if (!trimmed) return "";
+  const withProtocol = /^[a-zA-Z][a-zA-Z\d+\-.]*:/.test(trimmed) ? trimmed : `https://${trimmed}`;
+  try {
+    return new URL(withProtocol).toString();
+  } catch (error) {
+    return "";
+  }
+}
+function getBookmarkHostname(url) {
+  try {
+    return new URL(url).hostname.replace(/^www\./i, "");
+  } catch (error) {
+    return "";
+  }
+}
+function hasBookmarkDropPayload(dataTransfer) {
+  if (!dataTransfer?.types) return false;
+  const types = Array.from(dataTransfer.types);
+  return types.includes("text/uri-list") || types.includes("text/plain") || types.includes("text/html");
+}
+function parseDroppedBookmarkData(dataTransfer) {
+  if (!dataTransfer) return null;
+  const uriList = String(dataTransfer.getData("text/uri-list") || "").split(/\r?\n/).map((line) => line.trim()).find((line) => line && !line.startsWith("#"));
+  const plainText = String(dataTransfer.getData("text/plain") || "").trim();
+  const htmlText = String(dataTransfer.getData("text/html") || "").trim();
+  let title = "";
+  let url = normalizeBookmarkUrl(uriList);
+  if (htmlText) {
+    const htmlDoc = new DOMParser().parseFromString(htmlText, "text/html");
+    const anchor = htmlDoc.querySelector("a[href]");
+    if (anchor) {
+      if (!url) url = normalizeBookmarkUrl(anchor.getAttribute("href"));
+      title = String(anchor.textContent || "").trim();
+    }
+  }
+  if (!url && plainText) {
+    const plainLines = plainText.split(/\r?\n/).map((line) => line.trim()).filter(Boolean);
+    const plainUrl = plainLines.find((line) => normalizeBookmarkUrl(line));
+    if (plainUrl) {
+      url = normalizeBookmarkUrl(plainUrl);
+      title = title || plainLines.find((line) => line !== plainUrl) || "";
+    } else {
+      url = normalizeBookmarkUrl(plainText);
+    }
+  }
+  if (!url) return null;
+  return {
+    url,
+    name: title || getBookmarkHostname(url) || "북마크"
+  };
+}
+function getBookmarkFaviconCandidates(url) {
+  try {
+    const parsed = new URL(url);
+    return [
+      `https://www.google.com/s2/favicons?domain=${encodeURIComponent(parsed.hostname)}&sz=128`,
+      `https://icons.duckduckgo.com/ip3/${parsed.hostname}.ico`,
+      new URL("/favicon.ico", parsed).toString()
+    ].filter(Boolean);
+  } catch (error) {
+    return [];
+  }
+}
+function getBookmarkInitial(name, url) {
+  const base = String(name || getBookmarkHostname(url) || "B").trim();
+  return base.charAt(0).toUpperCase();
+}
+function normalizeBookmarkColor(rawValue) {
+  const trimmed = String(rawValue || "").trim();
+  if (!trimmed) return "";
+  const normalized = trimmed.startsWith("#") ? trimmed : `#${trimmed}`;
+  return /^#[0-9a-fA-F]{6}$/.test(normalized) ? normalized : "";
+}
+function hexToRgb(hex) {
+  const normalized = normalizeBookmarkColor(hex);
+  if (!normalized) return null;
+  return {
+    r: parseInt(normalized.slice(1, 3), 16),
+    g: parseInt(normalized.slice(3, 5), 16),
+    b: parseInt(normalized.slice(5, 7), 16)
+  };
+}
+function mixBookmarkChannel(value, target, ratio) {
+  return Math.round(value + (target - value) * ratio);
+}
+function toBookmarkRgbString(rgb) {
+  return `${rgb.r}, ${rgb.g}, ${rgb.b}`;
+}
+function getBookmarkSeedColor(seed) {
+  let hash = 0;
+  String(seed || "bookmark").split("").forEach((char) => {
+    hash = char.charCodeAt(0) + ((hash << 5) - hash);
+  });
+  void hash;
+  return null;
+}
+function getBookmarkThemeStyle(bookmark) {
+  const base = hexToRgb(bookmark.color) || getBookmarkSeedColor(bookmark.name || bookmark.url);
+  if (!base) return "";
+  const soft = {
+    r: mixBookmarkChannel(base.r, 255, 0.84),
+    g: mixBookmarkChannel(base.g, 255, 0.84),
+    b: mixBookmarkChannel(base.b, 255, 0.84)
+  };
+  const border = {
+    r: mixBookmarkChannel(base.r, 255, 0.58),
+    g: mixBookmarkChannel(base.g, 255, 0.58),
+    b: mixBookmarkChannel(base.b, 255, 0.58)
+  };
+  return `--bookmark-accent:${toBookmarkRgbString(base)};--bookmark-soft:${toBookmarkRgbString(soft)};--bookmark-border:${toBookmarkRgbString(border)};`;
+}
+function initBookmarksTab(root, { state, persist }) {
+  const panel = root.querySelector(".bookmarks-card") || root;
+  const els = {
+    list: panel.querySelector("#bookmarkList"),
+    cardViewBtn: panel.querySelector("#bookmarkCardViewBtn"),
+    listViewBtn: panel.querySelector("#bookmarkListViewBtn"),
+    manageLabelsBtn: panel.querySelector("#bookmarkManageLabelsBtn"),
+    modal: panel.querySelector("#bookmarkModal"),
+    modalTitle: panel.querySelector("#bookmarkModalTitle"),
+    modalCloseBtn: panel.querySelector("#bookmarkModalCloseBtn"),
+    nameInput: panel.querySelector("#bookmarkNameInput"),
+    urlInput: panel.querySelector("#bookmarkUrlInput"),
+    imageUrlInput: panel.querySelector("#bookmarkImageUrlInput"),
+    colorInput: panel.querySelector("#bookmarkColorInput"),
+    colorResetBtn: panel.querySelector("#bookmarkColorResetBtn"),
+    noteInput: panel.querySelector("#bookmarkNoteInput"),
+    labelPicker: panel.querySelector("#bookmarkLabelPicker"),
+    labelsModal: panel.querySelector("#bookmarkLabelsModal"),
+    labelsModalCloseBtn: panel.querySelector("#bookmarkLabelsModalCloseBtn"),
+    labelsEditorList: panel.querySelector("#bookmarkLabelsEditorList"),
+    labelsModalError: panel.querySelector("#bookmarkLabelsModalError"),
+    newLabelNameInput: panel.querySelector("#bookmarkNewLabelNameInput"),
+    newLabelColorInput: panel.querySelector("#bookmarkNewLabelColorInput"),
+    addLabelBtn: panel.querySelector("#bookmarkAddLabelBtn"),
+    labelEditor: panel.querySelector("#bookmarkLabelEditor"),
+    error: panel.querySelector("#bookmarkModalError"),
+    saveBtn: panel.querySelector("#bookmarkSaveBtn"),
+    deleteBtn: panel.querySelector("#bookmarkDeleteBtn"),
+    deleteConfirmModal: panel.querySelector("#bookmarkDeleteConfirmModal"),
+    deleteConfirmText: panel.querySelector("#bookmarkDeleteConfirmText"),
+    deleteConfirmCancelBtn: panel.querySelector("#bookmarkDeleteConfirmCancelBtn"),
+    deleteConfirmOkBtn: panel.querySelector("#bookmarkDeleteConfirmOkBtn")
+  };
+  let editingBookmarkId = null;
+  let pendingDeleteBookmarkId = null;
+  let draggedBookmarkId = null;
+  let didDragReorder = false;
+  let dropHoverDepth = 0;
+  let draftSelectedLabels = [];
+  if (applyDefaultBookmarksIfEmpty(state)) {
+    persist();
+  }
+  function openModal(bookmarkId = null, preset = null) {
+    ensureBookmarksState(state);
+    editingBookmarkId = bookmarkId;
+    const bookmark = state.bookmarks.find((item) => item.id === bookmarkId);
+    const draft = bookmark || preset || null;
+    els.modalTitle.textContent = bookmark ? "북마크 수정" : "북마크 추가";
+    els.nameInput.value = draft?.name || "";
+    els.urlInput.value = draft?.url || "";
+    els.imageUrlInput.value = draft?.imageUrl || "";
+    els.colorInput.value = draft?.color || DEFAULT_BOOKMARK_COLOR;
+    els.colorInput.dataset.isDefault = draft?.color ? "false" : "true";
+    els.noteInput.value = draft?.note || "";
+    draftSelectedLabels = normalizeBookmarkSelection(draft?.labels);
+    renderLabelPicker();
+    els.error.textContent = "";
+    els.deleteBtn.hidden = !bookmark;
+    els.modal.classList.add("open");
+    els.modal.setAttribute("aria-hidden", "false");
+    requestAnimationFrame(() => els.nameInput.focus());
+  }
+  function closeModal() {
+    editingBookmarkId = null;
+    draftSelectedLabels = [];
+    els.modal.classList.remove("open");
+    els.modal.setAttribute("aria-hidden", "true");
+  }
+  function renderLabelPicker() {
+    if (!els.labelPicker) return;
+    if (!state.bookmarkLabels.length) {
+      els.labelPicker.innerHTML = `<div class="bookmark-label-picker-empty">라벨 관리에서 먼저 라벨을 만들어 주세요.</div>`;
+      return;
+    }
+    els.labelPicker.innerHTML = state.bookmarkLabels.map((label) => {
+      const selected = draftSelectedLabels.includes(label.name);
+      return `<button type="button" class="bookmark-label-option${selected ? " selected" : ""}" data-bookmark-label-option="${escapeHtml(label.name)}"><span class="bookmark-tag" style="${getBookmarkTagStyle(label.name, state.bookmarkLabels)}">${escapeHtml(label.name)}</span></button>`;
+    }).join("");
+    els.labelPicker.querySelectorAll("[data-bookmark-label-option]").forEach((button) => {
+      button.addEventListener("click", () => {
+        const name = button.dataset.bookmarkLabelOption;
+        if (!name) return;
+        if (draftSelectedLabels.includes(name)) {
+          draftSelectedLabels = draftSelectedLabels.filter((item) => item !== name);
+        } else {
+          if (draftSelectedLabels.length >= 3) {
+            els.error.textContent = "라벨은 최대 3개까지 선택할 수 있어요.";
+            return;
+          }
+          draftSelectedLabels = [...draftSelectedLabels, name];
+        }
+        els.error.textContent = "";
+        renderLabelPicker();
+      });
+    });
+  }
+  function openLabelsModal() {
+    ensureBookmarksState(state);
+    renderLabelsEditor();
+    els.labelsModal.classList.add("open");
+    els.labelsModal.setAttribute("aria-hidden", "false");
+  }
+  function closeLabelsModal() {
+    els.labelsModal.classList.remove("open");
+    els.labelsModal.setAttribute("aria-hidden", "true");
+    els.labelsModalError.textContent = "";
+    els.newLabelNameInput.value = "";
+    els.newLabelColorInput.value = "#60a5fa";
+  }
+  function renderLabelsEditor() {
+    ensureBookmarksState(state);
+    els.labelsEditorList.innerHTML = state.bookmarkLabels.map((label) => `
+      <div class="bookmark-managed-label-row" data-bookmark-managed-label="${escapeHtml(label.name)}">
+        <span class="bookmark-tag" style="${getBookmarkTagStyle(label.name, state.bookmarkLabels)}">${escapeHtml(label.name)}</span>
+        <input class="bookmark-managed-label-name" data-bookmark-label-name="${escapeHtml(label.name)}" type="text" value="${escapeHtml(label.name)}" />
+        <input class="bookmark-label-color-input" data-bookmark-label-color="${escapeHtml(label.name)}" type="color" value="${escapeHtml(label.color)}" />
+        <button type="button" class="btn btn-muted bookmark-managed-label-delete" data-bookmark-label-delete="${escapeHtml(label.name)}">삭제</button>
+      </div>
+    `).join("");
+    els.labelsEditorList.querySelectorAll("[data-bookmark-label-color]").forEach((input) => {
+      input.addEventListener("input", () => {
+        const name = input.dataset.bookmarkLabelColor;
+        const color = normalizeBookmarkColor(input.value);
+        if (!name || !color) return;
+        state.bookmarkLabels = state.bookmarkLabels.map((label) => label.name === name ? { ...label, color } : label);
+        persist();
+        renderLabelsEditor();
+        render();
+      });
+    });
+    els.labelsEditorList.querySelectorAll("[data-bookmark-label-name]").forEach((input) => {
+      input.addEventListener("change", () => {
+        const previousName = input.dataset.bookmarkLabelName;
+        const nextName = String(input.value || "").trim();
+        if (!previousName || !nextName || previousName === nextName) {
+          renderLabelsEditor();
+          return;
+        }
+        if (state.bookmarkLabels.some((label) => label.name === nextName)) {
+          els.labelsModalError.textContent = "같은 이름의 라벨이 이미 있어요.";
+          renderLabelsEditor();
+          return;
+        }
+        state.bookmarkLabels = state.bookmarkLabels.map((label) => label.name === previousName ? { ...label, name: nextName } : label);
+        state.bookmarks = state.bookmarks.map((bookmark) => ({
+          ...bookmark,
+          labels: normalizeBookmarkSelection(bookmark.labels).map((label) => label === previousName ? nextName : label)
+        }));
+        draftSelectedLabels = draftSelectedLabels.map((label) => label === previousName ? nextName : label);
+        persist();
+        els.labelsModalError.textContent = "";
+        renderLabelsEditor();
+        renderLabelPicker();
+        render();
+      });
+    });
+    els.labelsEditorList.querySelectorAll("[data-bookmark-label-delete]").forEach((button) => {
+      button.addEventListener("click", () => {
+        const name = button.dataset.bookmarkLabelDelete;
+        state.bookmarkLabels = state.bookmarkLabels.filter((label) => label.name !== name);
+        state.bookmarks = state.bookmarks.map((bookmark) => ({
+          ...bookmark,
+          labels: normalizeBookmarkSelection(bookmark.labels).filter((label) => label !== name)
+        }));
+        draftSelectedLabels = draftSelectedLabels.filter((label) => label !== name);
+        persist();
+        renderLabelsEditor();
+        renderLabelPicker();
+        render();
+      });
+    });
+  }
+  function openDeleteConfirm(bookmarkId) {
+    const bookmark = state.bookmarks.find((item) => item.id === bookmarkId);
+    if (!bookmark) return;
+    pendingDeleteBookmarkId = bookmarkId;
+    els.deleteConfirmText.textContent = `${bookmark.name} 북마크를 목록에서 삭제합니다.`;
+    els.deleteConfirmModal.classList.add("open");
+    els.deleteConfirmModal.setAttribute("aria-hidden", "false");
+  }
+  function closeDeleteConfirm() {
+    pendingDeleteBookmarkId = null;
+    els.deleteConfirmModal.classList.remove("open");
+    els.deleteConfirmModal.setAttribute("aria-hidden", "true");
+  }
+  function saveBookmark() {
+    ensureBookmarksState(state);
+    const name = String(els.nameInput.value || "").trim();
+    const url = normalizeBookmarkUrl(els.urlInput.value);
+    const imageUrl = normalizeBookmarkUrl(els.imageUrlInput.value);
+    const color = els.colorInput.dataset.isDefault === "true" ? "" : normalizeBookmarkColor(els.colorInput.value);
+    const note = String(els.noteInput.value || "").trim();
+    const labels = normalizeBookmarkSelection(draftSelectedLabels);
+    if (!name) {
+      els.error.textContent = "북마크 이름을 입력해 주세요.";
+      els.nameInput.focus();
+      return;
+    }
+    if (!url) {
+      els.error.textContent = "열 수 있는 주소를 입력해 주세요.";
+      els.urlInput.focus();
+      return;
+    }
+    if (editingBookmarkId) {
+      state.bookmarks = state.bookmarks.map((item) => item.id === editingBookmarkId ? { ...item, name, url, note, imageUrl, color, labels } : item);
+    } else {
+      if (state.bookmarks.length >= MAX_BOOKMARKS) {
+        els.error.textContent = `북마크는 최대 ${MAX_BOOKMARKS}개까지 저장할 수 있어요.`;
+        return;
+      }
+      state.bookmarks = [...state.bookmarks, { id: `bookmark-${Date.now()}`, name, url, note, imageUrl, color, labels }];
+    }
+    persist();
+    closeModal();
+    render();
+  }
+  function confirmDeleteBookmark() {
+    const targetId = pendingDeleteBookmarkId || editingBookmarkId;
+    if (!targetId) return;
+    state.bookmarks = state.bookmarks.filter((item) => item.id !== targetId);
+    persist();
+    closeDeleteConfirm();
+    closeModal();
+    render();
+  }
+  function openBookmark(url) {
+    window.open(url, "_blank", "noopener,noreferrer");
+  }
+  function reorderBookmarks(fromId, toId) {
+    if (!fromId || !toId || fromId === toId) return;
+    const sourceIndex = state.bookmarks.findIndex((item) => item.id === fromId);
+    const targetIndex = state.bookmarks.findIndex((item) => item.id === toId);
+    if (sourceIndex < 0 || targetIndex < 0) return;
+    const next = [...state.bookmarks];
+    const [moved] = next.splice(sourceIndex, 1);
+    next.splice(targetIndex, 0, moved);
+    state.bookmarks = next;
+    persist();
+    didDragReorder = true;
+    render();
+  }
+  function clearExternalDropState() {
+    dropHoverDepth = 0;
+    panel.classList.remove("drop-target");
+  }
+  function handleExternalBookmarkDrop(event) {
+    event.preventDefault();
+    event.stopPropagation();
+    clearExternalDropState();
+    const dropped = parseDroppedBookmarkData(event.dataTransfer);
+    if (!dropped) return;
+    ensureBookmarksState(state);
+    const existing = state.bookmarks.find((item) => item.url === dropped.url);
+    if (existing) {
+      openModal(existing.id);
+      els.error.textContent = "이미 저장된 북마크예요.";
+      return;
+    }
+    openModal(null, dropped);
+  }
+  function bindBookmarkFaviconFallback() {
+    els.list.querySelectorAll("[data-bookmark-favicon]").forEach((img) => {
+      const media = img.closest(".bookmark-media");
+      if (!media) return;
+      const fallbackCandidates = JSON.parse(img.dataset.bookmarkFallbacks || "[]");
+      let currentIndex = Number(img.dataset.bookmarkIndex || 0);
+      const handleLoaded = () => {
+        if (img.naturalWidth > 0) {
+          media.classList.add("loaded");
+          media.classList.remove("failed");
+        }
+      };
+      const handleFailed = () => {
+        currentIndex += 1;
+        img.dataset.bookmarkIndex = String(currentIndex);
+        const nextSrc = fallbackCandidates[currentIndex];
+        if (nextSrc) {
+          img.src = nextSrc;
+          return;
+        }
+        media.classList.remove("loaded");
+        media.classList.add("failed");
+        img.removeAttribute("src");
+      };
+      img.addEventListener("load", handleLoaded, { once: true });
+      img.addEventListener("error", handleFailed, { once: true });
+      if (img.complete) {
+        if (img.naturalWidth > 0) handleLoaded();
+        else handleFailed();
+      }
+    });
+  }
+  function render() {
+    ensureBookmarksState(state);
+    panel.classList.toggle("bookmark-list-mode", state.bookmarkViewMode === "list");
+    els.cardViewBtn?.setAttribute("aria-pressed", String(state.bookmarkViewMode === "card"));
+    els.listViewBtn?.setAttribute("aria-pressed", String(state.bookmarkViewMode === "list"));
+    const bookmarkCards = state.bookmarks.map((bookmark) => {
+      const hostname = getBookmarkHostname(bookmark.url);
+      const faviconCandidates = getBookmarkFaviconCandidates(bookmark.url);
+      return `
+        <article class="bookmark-item" data-bookmark-open="${bookmark.id}" data-bookmark-id="${bookmark.id}" draggable="true" style="${getBookmarkThemeStyle(bookmark)}">
+          ${bookmark.imageUrl ? `<img class="bookmark-cover" src="${escapeHtml(bookmark.imageUrl)}" alt="" loading="lazy" referrerpolicy="no-referrer" />` : ""}
+          <div class="bookmark-item-top">
+            <div class="bookmark-media">
+              <img
+                class="bookmark-favicon"
+                data-bookmark-favicon
+                data-bookmark-index="0"
+                data-bookmark-fallbacks='${escapeHtml(JSON.stringify(faviconCandidates))}'
+                src="${escapeHtml(faviconCandidates[0] || "")}"
+                alt=""
+                loading="lazy"
+                referrerpolicy="no-referrer"
+              />
+              <div class="bookmark-badge">${escapeHtml(getBookmarkInitial(bookmark.name, bookmark.url))}</div>
+            </div>
+            <div class="bookmark-item-actions">
+              <button type="button" class="bookmark-icon-btn" data-bookmark-edit="${bookmark.id}" aria-label="북마크 수정">✎</button>
+            </div>
+          </div>
+          <h3>${escapeHtml(bookmark.name)}</h3>
+          ${renderBookmarkTagBadges(bookmark.labels)}
+          <div class="bookmark-host">${escapeHtml(hostname || bookmark.url)}</div>
+          <p class="bookmark-note">${escapeHtml(bookmark.note || "새 탭으로 열기")}</p>
+        </article>
+      `;
+    }).join("");
+    const addCard = state.bookmarks.length < MAX_BOOKMARKS ? `
+      <button type="button" class="bookmark-item bookmark-item-add" id="bookmarkAddBtn" aria-label="북마크 추가">
+        <span class="bookmark-add-plus">+</span>
+        <span class="bookmark-add-text">북마크 추가</span>
+      </button>
+    ` : "";
+    els.list.innerHTML = bookmarkCards + addCard;
+    els.list.querySelector("#bookmarkAddBtn")?.addEventListener("click", () => openModal());
+    els.list.querySelectorAll("[data-bookmark-open]").forEach((card) => {
+      card.addEventListener("click", () => {
+        if (didDragReorder) {
+          didDragReorder = false;
+          return;
+        }
+        const bookmark = state.bookmarks.find((item) => item.id === card.dataset.bookmarkOpen);
+        if (bookmark) openBookmark(bookmark.url);
+      });
+      card.addEventListener("dragstart", () => {
+        draggedBookmarkId = card.dataset.bookmarkId;
+        card.classList.add("dragging");
+      });
+      card.addEventListener("dragend", () => {
+        draggedBookmarkId = null;
+        card.classList.remove("dragging");
+        requestAnimationFrame(() => {
+          didDragReorder = false;
+        });
+      });
+      card.addEventListener("dragover", (event) => {
+        event.preventDefault();
+        if (!draggedBookmarkId || draggedBookmarkId === card.dataset.bookmarkId) return;
+        card.classList.add("drag-over");
+      });
+      card.addEventListener("dragleave", () => {
+        card.classList.remove("drag-over");
+      });
+      card.addEventListener("drop", (event) => {
+        if (draggedBookmarkId) {
+          event.preventDefault();
+          card.classList.remove("drag-over");
+          reorderBookmarks(draggedBookmarkId, card.dataset.bookmarkId);
+        }
+      });
+    });
+    els.list.querySelectorAll("[data-bookmark-edit]").forEach((button) => {
+      button.addEventListener("click", (event) => {
+        event.stopPropagation();
+        openModal(button.dataset.bookmarkEdit);
+      });
+    });
+    bindBookmarkFaviconFallback();
+  }
+  els.modalCloseBtn.addEventListener("click", closeModal);
+  els.cardViewBtn?.addEventListener("click", () => {
+    if (state.bookmarkViewMode === "card") return;
+    state.bookmarkViewMode = "card";
+    persist();
+    render();
+  });
+  els.listViewBtn?.addEventListener("click", () => {
+    if (state.bookmarkViewMode === "list") return;
+    state.bookmarkViewMode = "list";
+    persist();
+    render();
+  });
+  els.manageLabelsBtn?.addEventListener("click", openLabelsModal);
+  els.modal.addEventListener("click", (event) => {
+    if (event.target === els.modal) closeModal();
+  });
+  els.labelsModalCloseBtn?.addEventListener("click", closeLabelsModal);
+  els.labelsModal?.addEventListener("click", (event) => {
+    if (event.target === els.labelsModal) closeLabelsModal();
+  });
+  els.addLabelBtn?.addEventListener("click", () => {
+    const name = String(els.newLabelNameInput.value || "").trim();
+    const color = normalizeBookmarkColor(els.newLabelColorInput.value) || "#60a5fa";
+    if (!name) {
+      els.labelsModalError.textContent = "라벨 이름을 입력해 주세요.";
+      return;
+    }
+    if (state.bookmarkLabels.some((label) => label.name === name)) {
+      els.labelsModalError.textContent = "같은 이름의 라벨이 이미 있어요.";
+      return;
+    }
+    state.bookmarkLabels = [...state.bookmarkLabels, { name, color }];
+    persist();
+    els.labelsModalError.textContent = "";
+    els.newLabelNameInput.value = "";
+    els.newLabelColorInput.value = "#60a5fa";
+    renderLabelsEditor();
+    renderLabelPicker();
+    render();
+  });
+  panel.addEventListener("dragenter", (event) => {
+    if (draggedBookmarkId) return;
+    if (!hasBookmarkDropPayload(event.dataTransfer)) return;
+    dropHoverDepth += 1;
+    panel.classList.add("drop-target");
+  });
+  panel.addEventListener("dragover", (event) => {
+    if (draggedBookmarkId) return;
+    if (!hasBookmarkDropPayload(event.dataTransfer)) return;
+    event.preventDefault();
+    event.dataTransfer.dropEffect = "copy";
+    panel.classList.add("drop-target");
+  });
+  panel.addEventListener("dragleave", () => {
+    if (draggedBookmarkId) return;
+    dropHoverDepth = Math.max(0, dropHoverDepth - 1);
+    if (!dropHoverDepth) {
+      panel.classList.remove("drop-target");
+    }
+  });
+  panel.addEventListener("drop", (event) => {
+    if (draggedBookmarkId) return;
+    handleExternalBookmarkDrop(event);
+  });
+  els.colorInput?.addEventListener("input", () => {
+    els.colorInput.dataset.isDefault = "false";
+  });
+  els.colorResetBtn?.addEventListener("click", () => {
+    els.colorInput.value = DEFAULT_BOOKMARK_COLOR;
+    els.colorInput.dataset.isDefault = "true";
+  });
+  els.saveBtn.addEventListener("click", saveBookmark);
+  els.deleteBtn.addEventListener("click", () => {
+    if (!editingBookmarkId) return;
+    openDeleteConfirm(editingBookmarkId);
+  });
+  els.deleteConfirmCancelBtn.addEventListener("click", closeDeleteConfirm);
+  els.deleteConfirmOkBtn.addEventListener("click", confirmDeleteBookmark);
+  els.deleteConfirmModal.addEventListener("click", (event) => {
+    if (event.target === els.deleteConfirmModal) closeDeleteConfirm();
+  });
+  document.addEventListener("keydown", (event) => {
+    if (event.key === "Escape") {
+      closeLabelsModal();
+      closeDeleteConfirm();
+      closeModal();
+    }
+  });
+  render();
+  return {
+    onTabChange(isActive) {
+      if (!isActive) {
+        closeDeleteConfirm();
+        closeModal();
+      }
+    }
+  };
+}
+
+
+// FILE: .\v1.4\app\lunch\view.js
+const todoTemplate = `
+<section class="card todo-card">
+  <div class="todo-header">
+    <div>
+      <div class="todo-title-row">
+        <h2>오늘 할 일</h2>
+        <span id="todoAlertBadge" class="todo-alert-badge" hidden></span>
+      </div>
+      <p class="hint">기한, 반복 작업, 메모, 미리 알림까지 한 번에 관리하고 목록과 캘린더로 볼 수 있어요.</p>
+    </div>
+    <div class="todo-header-actions">
+      <div class="todo-view-toggle" aria-label="오늘 할 일 보기 방식">
+        <button id="todoListViewBtn" type="button" class="todo-view-btn active">☰</button>
+        <button id="todoCalendarViewBtn" type="button" class="todo-view-btn">◫</button>
+      </div>
+      <button id="todoAddBtn" type="button" class="btn btn-primary">할 일 추가</button>
+      <button id="todoAddEventBtn" type="button" class="btn btn-muted">일정 추가</button>
+    </div>
+  </div>
+
+  <div id="todoReminderBanner" class="todo-reminder-banner" hidden></div>
+
+  <div id="todoListView" class="todo-view-panel">
+    <div class="todo-filter-card">
+      <div class="todo-filter-card-label">필터</div>
+      <div class="todo-list-filters">
+        <button id="todoFavoritesFilterBtn" type="button" class="todo-filter-btn" aria-pressed="false" title="중요 표시된 일정만 보여줘" data-tooltip="중요 표시된 일정만 보여줘">★</button>
+        <button id="todoCompletedFilterBtn" type="button" class="todo-filter-btn todo-filter-btn-check" aria-pressed="true" title="완료된 일정도 함께 보여줘" data-tooltip="완료된 일정도 함께 보여줘"><span class="todo-filter-check-icon" aria-hidden="true"></span></button>
+      </div>
+    </div>
+    <div id="todoBoard" class="todo-board"></div>
+  </div>
+
+  <div id="todoCalendarView" class="todo-view-panel" hidden>
+    <div class="todo-calendar-toolbar">
+      <div class="todo-calendar-nav">
+        <button id="todoCalendarPrevBtn" type="button" class="btn btn-muted">이전</button>
+        <button id="todoCalendarTodayBtn" type="button" class="btn btn-muted">오늘</button>
+        <button id="todoCalendarNextBtn" type="button" class="btn btn-muted">다음</button>
+      </div>
+      <h3 id="todoCalendarTitle" class="todo-calendar-title"></h3>
+      <div class="todo-calendar-mode-toggle">
+        <button id="todoCalendarMonthBtn" type="button" class="todo-calendar-mode-btn active">월</button>
+        <button id="todoCalendarWeekBtn" type="button" class="todo-calendar-mode-btn">주</button>
+        <button id="todoCalendarDayBtn" type="button" class="todo-calendar-mode-btn">일</button>
+      </div>
+    </div>
+    <div id="todoCalendarBody" class="todo-calendar-body"></div>
+  </div>
+
+  <div id="todoQuickAddBar" class="todo-quick-add-bar" aria-label="빠른 할 일 추가">
+    <div class="todo-quick-add-inner">
+      <input id="todoQuickAddInput" type="text" placeholder="할 일을 빠르게 추가해보세요. Enter로 바로 저장" />
+      <button id="todoQuickAddBtn" type="button" class="btn btn-primary">추가</button>
+    </div>
+  </div>
+
+  <div id="todoModal" class="todo-modal" aria-hidden="true">
+    <div class="todo-modal-panel">
+      <button id="todoModalCloseBtn" type="button" class="btn btn-muted todo-modal-close" aria-label="오늘 할 일 팝업 닫기">✕</button>
+      <div id="todoModalKicker" class="bookmark-modal-kicker">할 일 관리</div>
+      <h3 id="todoModalTitle" class="bookmark-modal-title">할 일 추가</h3>
+      <div class="todo-form-grid">
+        <label class="field">
+          <span id="todoTitleLabel">할 일 이름</span>
+          <input id="todoTitleInput" type="text" placeholder="예: 보고서 초안 정리" />
+        </label>
+        <label class="field">
+          <span id="todoDateLabel">날짜/시간</span>
+          <input id="todoDueInput" type="datetime-local" />
+        </label>
+        <label class="field">
+          <span>반복 작업</span>
+          <select id="todoRecurrenceSelect">
+            <option value="none">반복 없음</option>
+            <option value="daily">매일</option>
+            <option value="every-other-day">격일</option>
+            <option value="weekly">매주</option>
+            <option value="biweekly">격주</option>
+            <option value="monthly">매월</option>
+          </select>
+        </label>
+        <label class="field">
+          <span>미리 알림</span>
+          <input id="todoReminderInput" type="datetime-local" />
+        </label>
+        <label class="field">
+          <span>장소</span>
+          <input id="todoLocationInput" type="text" placeholder="예: 5층 회의실 / 고객사 미팅룸" />
+        </label>
+        <label class="field field-span-2">
+          <span>메모</span>
+          <textarea id="todoNoteInput" rows="4" placeholder="세부 내용이나 체크 포인트를 적어둘 수 있어요."></textarea>
+        </label>
+      </div>
+      <div class="todo-modal-options">
+        <label class="todo-check">
+          <input id="todoFavoriteInput" type="checkbox" />
+          <span>중요 표시</span>
+        </label>
+        <label class="todo-check">
+          <input id="todoCompletedInput" type="checkbox" />
+          <span>완료 처리</span>
+        </label>
+      </div>
+      <div id="todoModalError" class="bookmark-modal-error" aria-live="polite"></div>
+      <div class="todo-modal-actions">
+        <button id="todoDeleteBtn" type="button" class="btn btn-muted" hidden>삭제</button>
+        <div class="todo-modal-actions-right">
+          <button id="todoCompleteBtn" type="button" class="btn btn-primary" hidden>완료</button>
+          <button id="todoCopyBtn" type="button" class="btn btn-muted" hidden>일정 복사</button>
+          <button id="todoCancelBtn" type="button" class="btn btn-muted">취소</button>
+          <button id="todoSaveBtn" type="button" class="btn btn-primary">저장</button>
+        </div>
+      </div>
+    </div>
+  </div>
+
+  <div id="todoDeleteConfirmModal" class="todo-modal" aria-hidden="true">
+    <div class="todo-modal-panel todo-delete-confirm-panel">
+      <div class="bookmark-modal-kicker">삭제 확인</div>
+      <h3 class="bookmark-modal-title">이 항목을 삭제할까요?</h3>
+      <p id="todoDeleteConfirmText" class="todo-delete-confirm-text"></p>
+      <div class="todo-modal-actions">
+        <div></div>
+        <div class="todo-modal-actions-right">
+          <button id="todoDeleteConfirmCancelBtn" type="button" class="btn btn-muted">취소</button>
+          <button id="todoDeleteConfirmOkBtn" type="button" class="btn btn-primary">삭제</button>
+        </div>
+      </div>
+    </div>
+  </div>
+</section>
+`;
+
+function initTodoTab(root, { state, persist }) {
+  const els = {
+    listViewBtn: root.querySelector("#todoListViewBtn"),
+    calendarViewBtn: root.querySelector("#todoCalendarViewBtn"),
+    addBtn: root.querySelector("#todoAddBtn"),
+    addEventBtn: root.querySelector("#todoAddEventBtn"),
+    reminderBanner: root.querySelector("#todoReminderBanner"),
+    alertBadge: root.querySelector("#todoAlertBadge"),
+    listView: root.querySelector("#todoListView"),
+    favoritesFilterBtn: root.querySelector("#todoFavoritesFilterBtn"),
+    completedFilterBtn: root.querySelector("#todoCompletedFilterBtn"),
+    calendarView: root.querySelector("#todoCalendarView"),
+    board: root.querySelector("#todoBoard"),
+    quickAddBar: root.querySelector("#todoQuickAddBar"),
+    quickAddInput: root.querySelector("#todoQuickAddInput"),
+    quickAddBtn: root.querySelector("#todoQuickAddBtn"),
+    calendarTitle: root.querySelector("#todoCalendarTitle"),
+    calendarBody: root.querySelector("#todoCalendarBody"),
+    calendarPrevBtn: root.querySelector("#todoCalendarPrevBtn"),
+    calendarTodayBtn: root.querySelector("#todoCalendarTodayBtn"),
+    calendarNextBtn: root.querySelector("#todoCalendarNextBtn"),
+    calendarMonthBtn: root.querySelector("#todoCalendarMonthBtn"),
+    calendarWeekBtn: root.querySelector("#todoCalendarWeekBtn"),
+    calendarDayBtn: root.querySelector("#todoCalendarDayBtn"),
+    modal: root.querySelector("#todoModal"),
+    modalCloseBtn: root.querySelector("#todoModalCloseBtn"),
+    modalKicker: root.querySelector("#todoModalKicker"),
+    modalTitle: root.querySelector("#todoModalTitle"),
+    titleLabel: root.querySelector("#todoTitleLabel"),
+    dateLabel: root.querySelector("#todoDateLabel"),
+    titleInput: root.querySelector("#todoTitleInput"),
+    dueInput: root.querySelector("#todoDueInput"),
+    recurrenceSelect: root.querySelector("#todoRecurrenceSelect"),
+    reminderInput: root.querySelector("#todoReminderInput"),
+    locationInput: root.querySelector("#todoLocationInput"),
+    noteInput: root.querySelector("#todoNoteInput"),
+    favoriteInput: root.querySelector("#todoFavoriteInput"),
+    completedInput: root.querySelector("#todoCompletedInput"),
+    modalError: root.querySelector("#todoModalError"),
+    saveBtn: root.querySelector("#todoSaveBtn"),
+    cancelBtn: root.querySelector("#todoCancelBtn"),
+    completeBtn: root.querySelector("#todoCompleteBtn"),
+    deleteBtn: root.querySelector("#todoDeleteBtn"),
+    copyBtn: root.querySelector("#todoCopyBtn"),
+    deleteConfirmModal: root.querySelector("#todoDeleteConfirmModal"),
+    deleteConfirmText: root.querySelector("#todoDeleteConfirmText"),
+    deleteConfirmCancelBtn: root.querySelector("#todoDeleteConfirmCancelBtn"),
+    deleteConfirmOkBtn: root.querySelector("#todoDeleteConfirmOkBtn")
+  };
+
+  const TODO_SECTIONS = [
+    { key: "today", label: "오늘 할 일", description: "오늘 안에 끝내기" },
+    { key: "next-week", label: "다음 주", description: "7일 안쪽 일정" },
+    { key: "next-month", label: "다음 달", description: "30일 안쪽 일정" }
+  ];
+  let editingTodoId = "";
+  let editingTodoType = "todo";
+  let dragTodoId = "";
+  let reminderTimer = null;
+  let tabAlertTimer = null;
+  let isTabActive = false;
+  let pendingDeleteTodoId = "";
+  let currentAlertTodoId = "";
+
+  if (els.quickAddBar && els.quickAddBar.parentElement !== document.body) {
+    document.body.appendChild(els.quickAddBar);
+  }
+  if (els.modal && els.modal.parentElement !== document.body) {
+    document.body.appendChild(els.modal);
+  }
+  if (els.deleteConfirmModal && els.deleteConfirmModal.parentElement !== document.body) {
+    document.body.appendChild(els.deleteConfirmModal);
+  }
+
+  function ensureTodoState() {
+    state.todoItems = Array.isArray(state.todoItems) ? state.todoItems.filter((item) => item && typeof item === "object").map((item) => ({
+      id: String(item.id || `todo-${Date.now()}-${Math.random().toString(16).slice(2, 8)}`),
+      type: item.type === "event" ? "event" : "todo",
+      title: String(item.title || "").trim(),
+      dueAt: String(item.dueAt || ""),
+      recurrence: ["none", "daily", "every-other-day", "weekly", "biweekly", "monthly"].includes(item.recurrence) ? item.recurrence : "none",
+      reminderAt: String(item.reminderAt || ""),
+      location: String(item.location || ""),
+      note: String(item.note || ""),
+      favorite: Boolean(item.favorite),
+      completed: Boolean(item.completed),
+      createdAt: String(item.createdAt || new Date().toISOString()),
+      updatedAt: String(item.updatedAt || new Date().toISOString()),
+      remindedAt: String(item.remindedAt || "")
+    })) : [];
+    state.todoViewMode = state.todoViewMode === "calendar" ? "calendar" : "list";
+    state.todoCalendarMode = ["month", "week", "day"].includes(state.todoCalendarMode) ? state.todoCalendarMode : "month";
+    state.todoSelectedDate = /^\d{4}-\d{2}-\d{2}$/.test(state.todoSelectedDate || "") ? state.todoSelectedDate : getDateKey(getToday());
+    state.todoShowFavoritesOnly = Boolean(state.todoShowFavoritesOnly);
+    state.todoShowCompleted = state.todoShowCompleted !== false;
+  }
+
+  function escapeHtml(value) {
+    return String(value ?? "")
+      .replace(/&/g, "&amp;")
+      .replace(/</g, "&lt;")
+      .replace(/>/g, "&gt;")
+      .replace(/"/g, "&quot;")
+      .replace(/'/g, "&#39;");
+  }
+
+  function parseLocalDateTime(value) {
+    if (!value) return null;
+    const date = new Date(value);
+    return Number.isNaN(date.getTime()) ? null : date;
+  }
+
+  function toInputDateTime(value) {
+    const date = parseLocalDateTime(value);
+    if (!date) return "";
+    return `${date.getFullYear()}-${pad(date.getMonth() + 1)}-${pad(date.getDate())}T${pad(date.getHours())}:${pad(date.getMinutes())}`;
+  }
+
+  function formatTodoDue(value) {
+    const date = parseLocalDateTime(value);
+    if (!date) return "일시 미정";
+    return `${date.getMonth() + 1}/${date.getDate()} ${pad(date.getHours())}:${pad(date.getMinutes())}`;
+  }
+
+  function getRecurrenceLabel(recurrence) {
+    return recurrence === "daily" ? "매일"
+      : recurrence === "every-other-day" ? "격일"
+      : recurrence === "weekly" ? "매주"
+      : recurrence === "biweekly" ? "격주"
+      : recurrence === "monthly" ? "매월"
+      : "";
+  }
+
+  function getTrashIconMarkup() {
+    return `
+      <svg viewBox="0 0 24 24" aria-hidden="true" focusable="false" class="todo-trash-icon">
+        <path d="M7.75 7.5h8.5l-.6 9.35a1.7 1.7 0 0 1-1.7 1.6h-3.9a1.7 1.7 0 0 1-1.7-1.6L7.75 7.5Z" fill="none" stroke="currentColor" stroke-width="1.75" stroke-linejoin="round"/>
+        <path d="M6.8 7.5h10.4M9.9 7.5V5.95c0-.55.45-1 1-1h2.2c.55 0 1 .45 1 1V7.5M10.35 10.2v5.1M13.65 10.2v5.1" fill="none" stroke="currentColor" stroke-width="1.75" stroke-linecap="round" stroke-linejoin="round"/>
+      </svg>
+    `;
+  }
+
+  function formatReminder(value) {
+    const date = parseLocalDateTime(value);
+    if (!date) return "";
+    return `알림 ${date.getMonth() + 1}/${date.getDate()} ${pad(date.getHours())}:${pad(date.getMinutes())}`;
+  }
+
+  function getCalendarAnchorDate() {
+    return parseDateKey(state.todoSelectedDate || getDateKey(getToday()));
+  }
+
+  function setCalendarAnchorDate(date) {
+    state.todoSelectedDate = getDateKey(date);
+  }
+
+  function sortTodos(items) {
+    return [...items].sort((left, right) => {
+      if (left.completed !== right.completed) return left.completed ? 1 : -1;
+      if (left.favorite !== right.favorite) return left.favorite ? -1 : 1;
+      const leftDue = parseLocalDateTime(left.dueAt)?.getTime() ?? Number.MAX_SAFE_INTEGER;
+      const rightDue = parseLocalDateTime(right.dueAt)?.getTime() ?? Number.MAX_SAFE_INTEGER;
+      if (leftDue !== rightDue) return leftDue - rightDue;
+      return left.createdAt.localeCompare(right.createdAt);
+    });
+  }
+
+  function isInToday(date) {
+    if (!date) return false;
+    return getDateKey(date) === getDateKey(getToday());
+  }
+
+  function isWithinDays(date, days) {
+    if (!date) return false;
+    const start = getToday();
+    const end = new Date(start);
+    end.setDate(end.getDate() + days);
+    end.setHours(23, 59, 59, 999);
+    return date > start && date <= end;
+  }
+
+  function getTodoSection(todo) {
+    const due = parseLocalDateTime(todo.dueAt);
+    if (!due) return "next-month";
+    if (isInToday(due)) return "today";
+    if (isWithinDays(due, 7)) return "next-week";
+    if (isWithinDays(due, 30)) return "next-month";
+    return "next-month";
+  }
+
+  function getSectionTodos(sectionKey) {
+    const items = sortTodos(state.todoItems);
+    return items.filter((item) => {
+      if (getTodoSection(item) !== sectionKey) return false;
+      if (state.todoShowFavoritesOnly && !item.favorite) return false;
+      if (!state.todoShowCompleted && item.completed) return false;
+      return true;
+    });
+  }
+
+  function getOccurrenceDueAt(baseDate, targetDate) {
+    const next = new Date(targetDate);
+    next.setHours(baseDate.getHours(), baseDate.getMinutes(), 0, 0);
+    return toInputDateTime(next);
+  }
+
+  function matchesRecurringDate(item, targetDate) {
+    const baseDate = parseLocalDateTime(item.dueAt);
+    if (!baseDate) return false;
+    const targetStart = new Date(targetDate.getFullYear(), targetDate.getMonth(), targetDate.getDate());
+    const baseStart = new Date(baseDate.getFullYear(), baseDate.getMonth(), baseDate.getDate());
+    const diffDays = Math.floor((targetStart.getTime() - baseStart.getTime()) / (24 * 60 * 60 * 1000));
+    if (diffDays < 0) return false;
+
+    if (item.recurrence === "daily") return true;
+    if (item.recurrence === "every-other-day") return diffDays % 2 === 0;
+    if (item.recurrence === "weekly") return diffDays % 7 === 0;
+    if (item.recurrence === "biweekly") return diffDays % 14 === 0;
+    if (item.recurrence === "monthly") {
+      return targetDate.getDate() === baseDate.getDate()
+        && (
+          targetDate.getFullYear() > baseDate.getFullYear()
+          || (targetDate.getFullYear() === baseDate.getFullYear() && targetDate.getMonth() >= baseDate.getMonth())
+        );
+    }
+    return false;
+  }
+
+  function getTodoAlertClass(todo) {
+    if (todo.completed) return "";
+    const due = parseLocalDateTime(todo.dueAt);
+    if (!due) return "";
+    const now = Date.now();
+    const dueTime = due.getTime();
+    if (dueTime < now) return " overdue";
+    if (dueTime <= now + (3 * 60 * 60 * 1000)) return " imminent";
+    return "";
+  }
+
+  function buildTodoRow(todo) {
+    const recurrenceLabel = getRecurrenceLabel(todo.recurrence);
+    const reminderLabel = formatReminder(todo.reminderAt);
+    return `
+      <article class="todo-item${todo.favorite ? " favorite" : ""}${todo.completed ? " completed" : ""}${getTodoAlertClass(todo)}" draggable="true" data-todo-id="${todo.id}">
+        <label class="todo-item-check">
+          <input type="checkbox" data-todo-complete="${todo.id}" ${todo.completed ? "checked" : ""} />
+        </label>
+        <button type="button" class="todo-favorite-btn${todo.favorite ? " active" : ""}" data-todo-favorite="${todo.id}" aria-label="중요 표시">★</button>
+        <div class="todo-item-main" data-todo-edit="${todo.id}">
+          <div class="todo-item-title-row">
+            <strong class="todo-item-title">${todo.type === "event" ? `<span class="todo-type-badge">일정</span> ` : ""}${escapeHtml(todo.title)}</strong>
+            <span class="todo-item-due">${escapeHtml(formatTodoDue(todo.dueAt))}</span>
+          </div>
+          <div class="todo-item-meta-row">
+            <span class="todo-item-note">${escapeHtml(todo.location || todo.note || "메모 없음")}</span>
+            <span class="todo-item-tags">${recurrenceLabel ? `<span class="todo-pill">${recurrenceLabel}</span>` : ""}${todo.location ? `<span class="todo-pill location">${escapeHtml(todo.location)}</span>` : ""}${reminderLabel ? `<span class="todo-pill reminder">${escapeHtml(reminderLabel)}</span>` : ""}</span>
+          </div>
+        </div>
+        <div class="todo-item-row-actions">
+          <button type="button" class="icon-btn todo-edit-btn" data-todo-edit="${todo.id}" aria-label="할 일 수정">✎</button>
+          <button type="button" class="icon-btn todo-trash-btn" data-todo-trash="${todo.id}" aria-label="할 일 삭제">${getTrashIconMarkup()}</button>
+        </div>
+      </article>
+    `;
+  }
+
+  function buildCalendarTodoCard(todo, compact = false) {
+    return `
+      <button
+        type="button"
+        class="todo-calendar-item${todo.completed ? " completed" : ""}${todo.favorite ? " favorite" : ""}${todo.type === "event" ? " event" : ""}${getTodoAlertClass(todo)}${compact ? " compact" : ""}"
+        data-calendar-todo-id="${todo.id}"
+        draggable="true"
+        title="${escapeHtml(todo.title)}"
+      >
+        <span class="todo-calendar-item-title">${escapeHtml(todo.title)}</span>
+      </button>
+    `;
+  }
+
+  function getTrackerScheduleItems(dateKey) {
+    const date = parseDateKey(dateKey);
+    const entry = state.entries?.[dateKey] || {};
+    const items = [];
+
+    if (isHoliday(date, entry)) {
+      items.push({
+        id: `tracker-holiday-${dateKey}`,
+        kind: "holiday",
+        title: getHolidayLabel(date, entry) || "공휴일",
+        dateKey
+      });
+    }
+
+    if (entry.leaveType === "full" || entry.leaveType === "half" || entry.leaveType === "quarter") {
+      const leaveTitle = entry.leaveType === "full" ? "휴가" : entry.leaveType === "half" ? "반차" : "반반차";
+      items.push({
+        id: `tracker-leave-${dateKey}`,
+        kind: "leave",
+        title: leaveTitle,
+        dateKey
+      });
+    }
+
+    if (entry.startTime || entry.endTime || entry.running || entry.liveStartTimestamp) {
+      items.push({
+        id: `tracker-work-${dateKey}`,
+        kind: "work",
+        title: entry.startTime || entry.endTime
+          ? `근무 ${entry.startTime || "--:--"} ~ ${entry.endTime || (getDateKey(getToday()) === dateKey ? "진행중" : "--:--")}`
+          : "근무 일정",
+        dateKey
+      });
+    }
+
+    return items;
+  }
+
+  function buildTrackerCalendarItem(item, compact = false) {
+    return `
+      <button
+        type="button"
+        class="todo-calendar-item todo-calendar-item-sync ${item.kind}${compact ? " compact" : ""}"
+        data-tracker-date="${item.dateKey}"
+        title="${escapeHtml(item.title)}"
+      >
+        <span class="todo-calendar-item-title">${escapeHtml(item.title)}</span>
+      </button>
+    `;
+  }
+
+  function openTrackerDate(dateKey) {
+    const date = parseDateKey(dateKey);
+    state.calendarYear = date.getFullYear();
+    state.calendarMonth = date.getMonth();
+    state.activeTab = "tracker";
+    persist();
+    document.querySelector('.tab-btn[data-tab="tracker"]')?.click();
+  }
+
+  function moveTodoToDate(todoId, dateKey) {
+    const targetDate = parseDateKey(dateKey);
+    state.todoItems = state.todoItems.map((item) => {
+      if (item.id !== todoId) return item;
+      const currentDue = parseLocalDateTime(item.dueAt) || new Date();
+      const nextDue = new Date(targetDate);
+      nextDue.setHours(currentDue.getHours(), currentDue.getMinutes(), 0, 0);
+      return {
+        ...item,
+        dueAt: toInputDateTime(nextDue),
+        updatedAt: new Date().toISOString()
+      };
+    });
+    state.todoSelectedDate = dateKey;
+    persist();
+    render();
+  }
+
+  function applySectionDueDate(todo, sectionKey) {
+    const base = parseLocalDateTime(todo.dueAt) || new Date();
+    const next = new Date(base);
+    if (sectionKey === "today") {
+      const today = getToday();
+      next.setFullYear(today.getFullYear(), today.getMonth(), today.getDate());
+      if (!todo.dueAt) next.setHours(18, 0, 0, 0);
+    }
+    if (sectionKey === "next-week") {
+      const today = getToday();
+      today.setDate(today.getDate() + 7);
+      next.setFullYear(today.getFullYear(), today.getMonth(), today.getDate());
+      if (!todo.dueAt) next.setHours(18, 0, 0, 0);
+    }
+    if (sectionKey === "next-month") {
+      const today = getToday();
+      today.setMonth(today.getMonth() + 1);
+      next.setFullYear(today.getFullYear(), today.getMonth(), today.getDate());
+      if (!todo.dueAt) next.setHours(18, 0, 0, 0);
+    }
+    return { ...todo, dueAt: toInputDateTime(next), updatedAt: new Date().toISOString() };
+  }
+
+  function buildNextRecurringTodo(todo) {
+    const due = parseLocalDateTime(todo.dueAt);
+    if (!due || todo.recurrence === "none") return null;
+    const nextDue = new Date(due);
+    if (todo.recurrence === "daily") nextDue.setDate(nextDue.getDate() + 1);
+    if (todo.recurrence === "every-other-day") nextDue.setDate(nextDue.getDate() + 2);
+    if (todo.recurrence === "weekly") nextDue.setDate(nextDue.getDate() + 7);
+    if (todo.recurrence === "biweekly") nextDue.setDate(nextDue.getDate() + 14);
+    if (todo.recurrence === "monthly") nextDue.setMonth(nextDue.getMonth() + 1);
+    const reminder = parseLocalDateTime(todo.reminderAt);
+    const nextReminder = reminder ? new Date(reminder) : null;
+    if (nextReminder) {
+      if (todo.recurrence === "daily") nextReminder.setDate(nextReminder.getDate() + 1);
+      if (todo.recurrence === "every-other-day") nextReminder.setDate(nextReminder.getDate() + 2);
+      if (todo.recurrence === "weekly") nextReminder.setDate(nextReminder.getDate() + 7);
+      if (todo.recurrence === "biweekly") nextReminder.setDate(nextReminder.getDate() + 14);
+      if (todo.recurrence === "monthly") nextReminder.setMonth(nextReminder.getMonth() + 1);
+    }
+    return {
+      ...todo,
+      id: `todo-${Date.now()}-${Math.random().toString(16).slice(2, 8)}`,
+      dueAt: toInputDateTime(nextDue),
+      reminderAt: nextReminder ? toInputDateTime(nextReminder) : "",
+      completed: false,
+      remindedAt: "",
+      createdAt: new Date().toISOString(),
+      updatedAt: new Date().toISOString()
+    };
+  }
+
+  function toggleComplete(todoId, completed) {
+    const target = state.todoItems.find((item) => item.id === todoId);
+    if (!target) return;
+    const shouldGenerateNext = completed && !target.completed && target.recurrence !== "none";
+    state.todoItems = state.todoItems.map((item) => item.id === todoId ? { ...item, completed, updatedAt: new Date().toISOString() } : item);
+    if (shouldGenerateNext) {
+      const next = buildNextRecurringTodo(target);
+      if (next) state.todoItems = [...state.todoItems, next];
+    }
+    persist();
+    render();
+  }
+
+  function toggleFavorite(todoId) {
+    state.todoItems = state.todoItems.map((item) => item.id === todoId ? { ...item, favorite: !item.favorite, updatedAt: new Date().toISOString() } : item);
+    persist();
+    render();
+  }
+
+  function openModal(todoId = "") {
+    ensureTodoState();
+    editingTodoId = todoId;
+    const todo = state.todoItems.find((item) => item.id === todoId);
+    const baseDate = state.todoViewMode === "calendar" ? getCalendarAnchorDate() : getToday();
+    const defaultDue = toInputDateTime(new Date(baseDate.getFullYear(), baseDate.getMonth(), baseDate.getDate(), 18, 0, 0, 0));
+    editingTodoType = todo?.type || editingTodoType || "todo";
+    const isEvent = editingTodoType === "event";
+    els.modalKicker.textContent = isEvent ? "일정 관리" : "할 일 관리";
+    els.modalTitle.textContent = todo ? (isEvent ? "일정 수정" : "할 일 수정") : (isEvent ? "일정 추가" : "할 일 추가");
+    els.titleLabel.textContent = isEvent ? "일정 이름" : "할 일 이름";
+    els.dateLabel.textContent = "날짜/시간";
+    els.titleInput.value = todo?.title || "";
+    els.dueInput.value = todo?.dueAt || defaultDue;
+    els.recurrenceSelect.value = todo?.recurrence || "none";
+    els.reminderInput.value = todo?.reminderAt || "";
+    els.locationInput.value = todo?.location || "";
+    els.noteInput.value = todo?.note || "";
+    els.favoriteInput.checked = Boolean(todo?.favorite);
+    els.completedInput.checked = Boolean(todo?.completed);
+    els.modalError.textContent = "";
+    els.deleteBtn.hidden = !todo;
+    els.completeBtn.hidden = !(todo && !todo.completed);
+    els.copyBtn.hidden = !(todo && isEvent);
+    els.modal.classList.add("open");
+    els.modal.setAttribute("aria-hidden", "false");
+    requestAnimationFrame(() => els.titleInput.focus());
+  }
+
+  function closeModal() {
+    editingTodoId = "";
+    editingTodoType = "todo";
+    els.modal.classList.remove("open");
+    els.modal.setAttribute("aria-hidden", "true");
+    els.modalError.textContent = "";
+  }
+
+  function openDeleteConfirm(todoId) {
+    const todo = state.todoItems.find((item) => item.id === todoId);
+    if (!todo) return;
+    pendingDeleteTodoId = todoId;
+    els.deleteConfirmText.textContent = `"${todo.title}" 항목을 삭제합니다.`;
+    els.deleteConfirmModal.classList.add("open");
+    els.deleteConfirmModal.setAttribute("aria-hidden", "false");
+  }
+
+  function closeDeleteConfirm() {
+    pendingDeleteTodoId = "";
+    els.deleteConfirmModal.classList.remove("open");
+    els.deleteConfirmModal.setAttribute("aria-hidden", "true");
+  }
+
+  function saveTodo() {
+    const title = els.titleInput.value.trim();
+    const dueAt = els.dueInput.value;
+    if (!title) {
+      els.modalError.textContent = editingTodoType === "event" ? "일정 이름을 입력해 주세요." : "할 일 이름을 입력해 주세요.";
+      return;
+    }
+    if (!dueAt) {
+      els.modalError.textContent = "날짜와 시간을 입력해 주세요.";
+      return;
+    }
+    const nextTodo = {
+      id: editingTodoId || `todo-${Date.now()}-${Math.random().toString(16).slice(2, 8)}`,
+      type: editingTodoType,
+      title,
+      dueAt,
+      recurrence: els.recurrenceSelect.value,
+      reminderAt: els.reminderInput.value,
+      location: els.locationInput.value.trim(),
+      note: els.noteInput.value.trim(),
+      favorite: els.favoriteInput.checked,
+      completed: els.completedInput.checked,
+      createdAt: editingTodoId ? (state.todoItems.find((item) => item.id === editingTodoId)?.createdAt || new Date().toISOString()) : new Date().toISOString(),
+      updatedAt: new Date().toISOString(),
+      remindedAt: editingTodoId ? (state.todoItems.find((item) => item.id === editingTodoId)?.remindedAt || "") : ""
+    };
+    if (editingTodoId) {
+      state.todoItems = state.todoItems.map((item) => item.id === editingTodoId ? nextTodo : item);
+    } else {
+      state.todoItems = [...state.todoItems, nextTodo];
+    }
+    persist();
+    closeModal();
+    render();
+  }
+
+  function copySchedule() {
+    if (!editingTodoId) return;
+    const source = state.todoItems.find((item) => item.id === editingTodoId);
+    if (!source) return;
+    state.todoItems = [...state.todoItems, {
+      ...source,
+      id: `todo-${Date.now()}-${Math.random().toString(16).slice(2, 8)}`,
+      title: `${source.title} 복사본`,
+      completed: false,
+      remindedAt: "",
+      createdAt: new Date().toISOString(),
+      updatedAt: new Date().toISOString()
+    }];
+    persist();
+    closeModal();
+    render();
+  }
+
+  function getQuickAddDueAt() {
+    const now = new Date();
+    const baseDate = state.todoViewMode === "calendar" ? getCalendarAnchorDate() : getToday();
+    const due = new Date(baseDate);
+    due.setHours(18, 0, 0, 0);
+    if (due < now) {
+      due.setTime(now.getTime());
+      due.setMinutes(Math.ceil(now.getMinutes() / 10) * 10, 0, 0);
+    }
+    return toInputDateTime(due);
+  }
+
+  function saveQuickTodo() {
+    const title = els.quickAddInput.value.trim();
+    if (!title) return;
+    state.todoItems = [...state.todoItems, {
+      id: `todo-${Date.now()}-${Math.random().toString(16).slice(2, 8)}`,
+      type: "todo",
+      title,
+      dueAt: getQuickAddDueAt(),
+      recurrence: "none",
+      reminderAt: "",
+      location: "",
+      note: "",
+      favorite: false,
+      completed: false,
+      createdAt: new Date().toISOString(),
+      updatedAt: new Date().toISOString(),
+      remindedAt: ""
+    }];
+    els.quickAddInput.value = "";
+    persist();
+    render();
+  }
+
+  function deleteTodo() {
+    if (!editingTodoId) return;
+    openDeleteConfirm(editingTodoId);
+  }
+
+  function completeFromModal() {
+    if (!editingTodoId) return;
+    toggleComplete(editingTodoId, true);
+    closeModal();
+  }
+
+  function confirmDeleteTodo() {
+    if (!pendingDeleteTodoId) return;
+    state.todoItems = state.todoItems.filter((item) => item.id !== pendingDeleteTodoId);
+    persist();
+    if (editingTodoId === pendingDeleteTodoId) {
+      closeModal();
+    }
+    closeDeleteConfirm();
+    render();
+  }
+
+  function renderBoard() {
+    els.board.innerHTML = `
+      ${TODO_SECTIONS.map((section) => {
+        const items = getSectionTodos(section.key);
+        return `
+          <section class="todo-section todo-section-focused" data-todo-drop-section="${section.key}">
+            <div class="todo-section-header">
+              <div>
+                <h3>${section.label}</h3>
+                <p>${section.description}</p>
+              </div>
+              <span class="todo-section-count">${items.length}</span>
+            </div>
+            <div class="todo-section-list">
+              ${items.length ? items.map(buildTodoRow).join("") : `<div class="todo-empty">아직 할 일이 없어요.</div>`}
+            </div>
+          </section>
+        `;
+      }).join("")}
+    `;
+
+    els.board.querySelectorAll("[data-todo-edit]").forEach((button) => {
+      button.addEventListener("click", () => openModal(button.dataset.todoEdit));
+    });
+    els.board.querySelectorAll("[data-todo-favorite]").forEach((button) => {
+      button.addEventListener("click", (event) => {
+        event.stopPropagation();
+        toggleFavorite(button.dataset.todoFavorite);
+      });
+    });
+    els.board.querySelectorAll("[data-todo-trash]").forEach((button) => {
+      button.addEventListener("click", (event) => {
+        event.stopPropagation();
+        openDeleteConfirm(button.dataset.todoTrash);
+      });
+    });
+    els.board.querySelectorAll("[data-todo-complete]").forEach((input) => {
+      input.addEventListener("change", () => toggleComplete(input.dataset.todoComplete, input.checked));
+    });
+    els.board.querySelectorAll("[data-todo-id]").forEach((item) => {
+      item.addEventListener("dragstart", () => {
+        dragTodoId = item.dataset.todoId;
+        item.classList.add("dragging");
+      });
+      item.addEventListener("dragend", () => {
+        dragTodoId = "";
+        item.classList.remove("dragging");
+        els.board.querySelectorAll(".todo-section.drop-target").forEach((section) => section.classList.remove("drop-target"));
+      });
+    });
+    els.board.querySelectorAll("[data-todo-drop-section]").forEach((section) => {
+      section.addEventListener("dragover", (event) => {
+        event.preventDefault();
+      });
+      section.addEventListener("dragenter", (event) => {
+        event.preventDefault();
+        section.classList.add("drop-target");
+      });
+      section.addEventListener("dragleave", (event) => {
+        if (!section.contains(event.relatedTarget)) {
+          section.classList.remove("drop-target");
+        }
+      });
+      section.addEventListener("drop", (event) => {
+        event.preventDefault();
+        section.classList.remove("drop-target");
+        if (!dragTodoId) return;
+        state.todoItems = state.todoItems.map((item) => item.id === dragTodoId ? applySectionDueDate(item, section.dataset.todoDropSection) : item);
+        persist();
+        render();
+      });
+    });
+  }
+
+  function getTodosForDateKey(dateKey) {
+    const targetDate = parseDateKey(dateKey);
+    return sortTodos(
+      state.todoItems.flatMap((item) => {
+        const due = parseLocalDateTime(item.dueAt);
+        if (!due) return [];
+
+        if (getDateKey(due) === dateKey) {
+          return [item];
+        }
+
+        if (item.recurrence === "none" || !matchesRecurringDate(item, targetDate)) {
+          return [];
+        }
+
+        return [{
+          ...item,
+          dueAt: getOccurrenceDueAt(due, targetDate),
+          completed: false,
+          isRecurringPreview: true
+        }];
+      })
+    );
+  }
+
+  function renderAgenda(dateKey, titleText = "") {
+    const items = getTodosForDateKey(dateKey);
+    return `
+      <div class="todo-agenda">
+        <div class="todo-agenda-title">${titleText || `${dateKey} 일정`}</div>
+        ${items.length
+          ? items.map((item) => `
+            <button type="button" class="todo-agenda-item${item.completed ? " completed" : ""}" data-todo-edit="${item.id}">
+              <span class="todo-agenda-item-time">${escapeHtml(formatTodoDue(item.dueAt))}</span>
+              <span class="todo-agenda-item-title">${escapeHtml(item.title)}</span>
+            </button>
+          `).join("")
+          : `<div class="todo-empty">선택한 날짜 일정이 없어요.</div>`}
+      </div>
+    `;
+  }
+
+  function getVisibleTimelineDateKeys(anchorDate) {
+    if (state.todoCalendarMode === "day") {
+      return [getDateKey(anchorDate)];
+    }
+    if (state.todoCalendarMode === "week") {
+      const weekStart = getWeekStart(anchorDate);
+      return Array.from({ length: 7 }, (_, index) => {
+        const date = new Date(weekStart);
+        date.setDate(weekStart.getDate() + index);
+        return getDateKey(date);
+      });
+    }
+    const year = anchorDate.getFullYear();
+    const month = anchorDate.getMonth();
+    const lastDate = new Date(year, month + 1, 0).getDate();
+    return Array.from({ length: lastDate }, (_, index) => getDateKey(new Date(year, month, index + 1)));
+  }
+
+  function formatTimelineDate(dateKey) {
+    const date = parseDateKey(dateKey);
+    return `${date.getMonth() + 1}월 ${date.getDate()}일 (${getWeekdayLabel(date)})`;
+  }
+
+  function buildTimelineItem(todo) {
+    return `
+      <button
+        type="button"
+        class="todo-timeline-item${todo.completed ? " completed" : ""}${todo.favorite ? " favorite" : ""}${todo.type === "event" ? " event" : ""}${getTodoAlertClass(todo)}"
+        data-todo-edit="${todo.id}"
+        data-calendar-todo-id="${todo.id}"
+        draggable="true"
+      >
+        <span class="todo-timeline-item-time">${escapeHtml(formatTodoDue(todo.dueAt))}</span>
+        <span class="todo-timeline-item-main">
+          ${todo.favorite ? `<span class="todo-important-star" aria-hidden="true">★</span>` : ""}
+          ${todo.type === "event" ? `<span class="todo-type-badge timeline">일정</span>` : ""}
+          <span class="todo-timeline-item-title">${escapeHtml(todo.title)}</span>
+        </span>
+      </button>
+    `;
+  }
+
+  function buildTrackerTimelineItem(item) {
+    return `
+      <button type="button" class="todo-timeline-item sync ${item.kind}" data-tracker-date="${item.dateKey}">
+        <span class="todo-timeline-item-time">월루생활</span>
+        <span class="todo-timeline-item-main">
+          <span class="todo-timeline-item-title">${escapeHtml(item.title)}</span>
+        </span>
+      </button>
+    `;
+  }
+
+  function renderCalendarTimeline(anchorDate) {
+    const groups = getVisibleTimelineDateKeys(anchorDate)
+      .map((dateKey) => ({
+        dateKey,
+        items: getTodosForDateKey(dateKey)
+      }))
+      .filter((group) => group.items.length);
+
+    return `
+      <div class="todo-timeline">
+        <div class="todo-timeline-header">날짜별 일정</div>
+        ${groups.length
+          ? groups.map((group) => `
+            <section class="todo-timeline-group" data-todo-drop-date="${group.dateKey}">
+              <div class="todo-timeline-date">${formatTimelineDate(group.dateKey)}</div>
+              <div class="todo-timeline-list">
+                ${[
+                  ...getTrackerScheduleItems(group.dateKey).map((item) => buildTrackerTimelineItem(item)),
+                  ...group.items.map((item) => buildTimelineItem(item))
+                ].join("")}
+              </div>
+            </section>
+          `).join("")
+          : `<div class="todo-empty">보이는 기간 안에 등록된 일정이 없어요.</div>`}
+      </div>
+    `;
+  }
+
+  function renderMonthCalendar(anchorDate) {
+    const year = anchorDate.getFullYear();
+    const month = anchorDate.getMonth();
+    els.calendarTitle.textContent = `${year}년 ${month + 1}월`;
+    const monthStart = new Date(year, month, 1);
+    const gridStart = new Date(monthStart);
+    gridStart.setDate(monthStart.getDate() - monthStart.getDay());
+    const cells = [];
+    for (let index = 0; index < 42; index += 1) {
+      const date = new Date(gridStart);
+      date.setDate(gridStart.getDate() + index);
+      const dateKey = getDateKey(date);
+      const items = getTodosForDateKey(dateKey);
+      const trackerItems = getTrackerScheduleItems(dateKey);
+      const mergedCount = items.length + trackerItems.length;
+      cells.push(`
+        <section class="todo-calendar-cell${date.getMonth() !== month ? " is-other" : ""}${dateKey === state.todoSelectedDate ? " active" : ""}${date.getDay() === 0 ? " sunday" : ""}${date.getDay() === 6 ? " saturday" : ""}" data-todo-drop-date="${dateKey}" data-todo-date="${dateKey}">
+          <button type="button" class="todo-calendar-date-btn" data-todo-date="${dateKey}">
+            <span class="todo-calendar-date">${date.getDate()}</span>
+            <span class="todo-calendar-count">${mergedCount ? `${mergedCount}개` : ""}</span>
+          </button>
+          <div class="todo-calendar-items">
+            ${[...trackerItems.map((item) => buildTrackerCalendarItem(item, true)), ...items.map((item) => buildCalendarTodoCard(item, true))].length
+              ? [...trackerItems.map((item) => buildTrackerCalendarItem(item, true)), ...items.map((item) => buildCalendarTodoCard(item, true))].slice(0, 3).join("")
+              : `<div class="todo-calendar-empty-slot"></div>`}
+            ${mergedCount > 3 ? `<div class="todo-calendar-more">+${mergedCount - 3}</div>` : ""}
+          </div>
+        </section>
+      `);
+    }
+    els.calendarBody.innerHTML = `
+      <div class="todo-calendar-grid todo-calendar-grid-month">
+        <div class="todo-calendar-weekdays">${["일", "월", "화", "수", "목", "금", "토"].map((label) => `<span>${label}</span>`).join("")}</div>
+        <div class="todo-calendar-cells">${cells.join("")}</div>
+      </div>
+      ${renderCalendarTimeline(anchorDate)}
+    `;
+  }
+
+  function getWeekStart(date) {
+    const weekStart = new Date(date);
+    weekStart.setDate(date.getDate() - date.getDay());
+    weekStart.setHours(0, 0, 0, 0);
+    return weekStart;
+  }
+
+  function renderWeekCalendar(anchorDate) {
+    const weekStart = getWeekStart(anchorDate);
+    const days = Array.from({ length: 7 }, (_, index) => {
+      const date = new Date(weekStart);
+      date.setDate(weekStart.getDate() + index);
+      const dateKey = getDateKey(date);
+      const items = getTodosForDateKey(dateKey);
+      const trackerItems = getTrackerScheduleItems(dateKey);
+      return `
+        <section class="todo-week-column${date.getDay() === 0 ? " sunday" : ""}${date.getDay() === 6 ? " saturday" : ""}" data-todo-drop-date="${dateKey}">
+          <button type="button" class="todo-week-heading${dateKey === state.todoSelectedDate ? " active" : ""}" data-todo-date="${dateKey}">
+            <span>${date.getMonth() + 1}/${date.getDate()}</span>
+            <strong>${getWeekdayLabel(date)}</strong>
+          </button>
+          <div class="todo-week-list">
+            ${[...trackerItems.map((item) => buildTrackerCalendarItem(item)), ...items.map((item) => buildCalendarTodoCard(item))].length
+              ? [...trackerItems.map((item) => buildTrackerCalendarItem(item)), ...items.map((item) => buildCalendarTodoCard(item))].join("")
+              : `<div class="todo-empty small">없음</div>`}
+          </div>
+        </section>
+      `;
+    });
+    const weekEnd = new Date(weekStart);
+    weekEnd.setDate(weekStart.getDate() + 6);
+    els.calendarTitle.textContent = `${weekStart.getMonth() + 1}/${weekStart.getDate()} - ${weekEnd.getMonth() + 1}/${weekEnd.getDate()}`;
+    els.calendarBody.innerHTML = `
+      <div class="todo-week-grid">${days.join("")}</div>
+      ${renderCalendarTimeline(anchorDate)}
+    `;
+  }
+
+  function renderDayCalendar(anchorDate) {
+    const dateKey = getDateKey(anchorDate);
+    const weekday = getWeekdayLabel(anchorDate);
+    const weekdayClass = anchorDate.getDay() === 0 || anchorDate.getDay() === 6 ? " weekend" : "";
+    els.calendarTitle.innerHTML = `${anchorDate.getFullYear()}년 ${anchorDate.getMonth() + 1}월 ${anchorDate.getDate()}일 <span class="todo-calendar-title-weekday${weekdayClass}">(${weekday})</span>`;
+    els.calendarBody.innerHTML = `
+      <section class="todo-day-board" data-todo-drop-date="${dateKey}">
+        ${renderAgenda(dateKey, `${getWeekdayLabel(anchorDate)}요일 일정`)}
+      </section>
+      ${renderCalendarTimeline(anchorDate)}
+    `;
+  }
+
+  function renderCalendar() {
+    const anchorDate = getCalendarAnchorDate();
+    if (state.todoCalendarMode === "month") renderMonthCalendar(anchorDate);
+    if (state.todoCalendarMode === "week") renderWeekCalendar(anchorDate);
+    if (state.todoCalendarMode === "day") renderDayCalendar(anchorDate);
+    els.calendarBody.querySelectorAll("[data-todo-date]").forEach((button) => {
+      button.addEventListener("click", () => {
+        state.todoSelectedDate = button.dataset.todoDate;
+        persist();
+        render();
+      });
+    });
+    els.calendarBody.querySelectorAll("[data-todo-edit], [data-calendar-todo-id]").forEach((button) => {
+      button.addEventListener("click", (event) => {
+        event.stopPropagation();
+        openModal(button.dataset.todoEdit || button.dataset.calendarTodoId);
+      });
+    });
+    els.calendarBody.querySelectorAll("[data-tracker-date]").forEach((button) => {
+      button.addEventListener("click", (event) => {
+        event.stopPropagation();
+        openTrackerDate(button.dataset.trackerDate);
+      });
+    });
+    els.calendarBody.querySelectorAll("[data-calendar-todo-id]").forEach((item) => {
+      item.addEventListener("dragstart", () => {
+        dragTodoId = item.dataset.calendarTodoId;
+        item.classList.add("dragging");
+      });
+      item.addEventListener("dragend", () => {
+        dragTodoId = "";
+        item.classList.remove("dragging");
+        els.calendarBody.querySelectorAll(".todo-drop-target").forEach((zone) => zone.classList.remove("todo-drop-target"));
+      });
+    });
+    els.calendarBody.querySelectorAll("[data-todo-drop-date]").forEach((zone) => {
+      zone.addEventListener("dragover", (event) => {
+        event.preventDefault();
+      });
+      zone.addEventListener("dragenter", (event) => {
+        event.preventDefault();
+        zone.classList.add("todo-drop-target");
+      });
+      zone.addEventListener("dragleave", (event) => {
+        if (!zone.contains(event.relatedTarget)) {
+          zone.classList.remove("todo-drop-target");
+        }
+      });
+      zone.addEventListener("drop", (event) => {
+        event.preventDefault();
+        zone.classList.remove("todo-drop-target");
+        if (!dragTodoId) return;
+        moveTodoToDate(dragTodoId, zone.dataset.todoDropDate);
+      });
+    });
+  }
+
+  function renderReminderBanner() {
+    const now = new Date();
+    const dueItems = state.todoItems.filter((item) => {
+      const reminder = parseLocalDateTime(item.reminderAt);
+      return reminder && !item.completed && reminder <= now;
+    });
+    if (!dueItems.length) {
+      els.reminderBanner.hidden = true;
+      els.reminderBanner.textContent = "";
+      return;
+    }
+    els.reminderBanner.hidden = false;
+    els.reminderBanner.textContent = `미리 알림: ${dueItems.slice(0, 2).map((item) => item.title).join(", ")}${dueItems.length > 2 ? ` 외 ${dueItems.length - 2}개` : ""}`;
+  }
+
+  function getTodoAlertState() {
+    const now = Date.now();
+    const threshold = now + (3 * 60 * 60 * 1000);
+    const pendingItems = state.todoItems
+      .filter((item) => !item.completed)
+      .map((item) => ({ item, due: parseLocalDateTime(item.dueAt) }))
+      .filter((entry) => entry.due);
+
+    const overdue = pendingItems
+      .filter((entry) => entry.due.getTime() < now)
+      .sort((left, right) => right.due.getTime() - left.due.getTime())[0];
+    if (overdue) {
+      return {
+        tone: "overdue",
+        text: `${overdue.item.title} 종료 시간 초과!!`,
+        todoId: overdue.item.id
+      };
+    }
+
+    const imminent = pendingItems
+      .filter((entry) => {
+        const dueTime = entry.due.getTime();
+        return dueTime >= now && dueTime <= threshold;
+      })
+      .sort((left, right) => left.due.getTime() - right.due.getTime())[0];
+    if (imminent) {
+      return {
+        tone: "imminent",
+        text: `${imminent.item.title} 종료 임박!`,
+        todoId: imminent.item.id
+      };
+    }
+
+    return { tone: "", text: "", todoId: "" };
+  }
+
+  function syncElapsedEvents() {
+    const now = Date.now();
+    const generatedItems = [];
+    let changed = false;
+
+    state.todoItems = state.todoItems.map((item) => {
+      if (item.type !== "event" || item.completed) return item;
+      const due = parseLocalDateTime(item.dueAt);
+      if (!due || due.getTime() > now) return item;
+
+      changed = true;
+      if (item.recurrence !== "none") {
+        const nextItem = buildNextRecurringTodo(item);
+        if (nextItem) generatedItems.push(nextItem);
+      }
+
+      return {
+        ...item,
+        completed: true,
+        updatedAt: new Date().toISOString()
+      };
+    });
+
+    if (generatedItems.length) {
+      state.todoItems = [...state.todoItems, ...generatedItems];
+    }
+
+    if (changed) {
+      persist();
+    }
+  }
+
+  function updateTodoTabAlert() {
+    const alertState = getTodoAlertState();
+    currentAlertTodoId = alertState.todoId || "";
+    setTabAlert("todo", "todo", alertState.tone === "imminent");
+    setTabAlert("todo", "todo-overdue", alertState.tone === "overdue");
+    if (els.alertBadge) {
+      els.alertBadge.hidden = !alertState.text;
+      els.alertBadge.textContent = alertState.text;
+      els.alertBadge.dataset.tone = alertState.tone || "";
+    }
+    setGlobalTodoAlert(alertState.text, alertState.tone);
+  }
+
+  function render() {
+    ensureTodoState();
+    syncElapsedEvents();
+    const isCalendar = state.todoViewMode === "calendar";
+    els.listView.hidden = isCalendar;
+    els.calendarView.hidden = !isCalendar;
+    els.listViewBtn.classList.toggle("active", !isCalendar);
+    els.calendarViewBtn.classList.toggle("active", isCalendar);
+    els.favoritesFilterBtn.classList.toggle("active", state.todoShowFavoritesOnly);
+    els.favoritesFilterBtn.setAttribute("aria-pressed", state.todoShowFavoritesOnly ? "true" : "false");
+    els.completedFilterBtn.classList.toggle("active", state.todoShowCompleted);
+    els.completedFilterBtn.setAttribute("aria-pressed", state.todoShowCompleted ? "true" : "false");
+    els.calendarMonthBtn.classList.toggle("active", state.todoCalendarMode === "month");
+    els.calendarWeekBtn.classList.toggle("active", state.todoCalendarMode === "week");
+    els.calendarDayBtn.classList.toggle("active", state.todoCalendarMode === "day");
+    els.calendarTitle.classList.toggle("wide", state.todoCalendarMode === "day");
+    els.quickAddBar?.classList.toggle("active", isTabActive);
+    renderReminderBanner();
+    updateTodoTabAlert();
+    renderBoard();
+    renderCalendar();
+  }
+
+  function shiftCalendar(step) {
+    const anchor = getCalendarAnchorDate();
+    if (state.todoCalendarMode === "month") anchor.setMonth(anchor.getMonth() + step);
+    if (state.todoCalendarMode === "week") anchor.setDate(anchor.getDate() + (7 * step));
+    if (state.todoCalendarMode === "day") anchor.setDate(anchor.getDate() + step);
+    setCalendarAnchorDate(anchor);
+    persist();
+    render();
+  }
+
+  function startReminderLoop() {
+    if (reminderTimer) clearInterval(reminderTimer);
+    reminderTimer = setInterval(() => {
+      syncElapsedEvents();
+      renderReminderBanner();
+      updateTodoTabAlert();
+      render();
+    }, 30000);
+  }
+
+  els.addBtn.addEventListener("click", () => {
+    editingTodoType = "todo";
+    openModal();
+  });
+  els.addEventBtn.addEventListener("click", () => {
+    editingTodoType = "event";
+    openModal();
+  });
+  els.quickAddBtn.addEventListener("click", saveQuickTodo);
+  els.quickAddInput.addEventListener("keydown", (event) => {
+    if (event.key === "Enter") {
+      event.preventDefault();
+      saveQuickTodo();
+    }
+  });
+  els.listViewBtn.addEventListener("click", () => {
+    state.todoViewMode = "list";
+    persist();
+    render();
+  });
+  els.favoritesFilterBtn.addEventListener("click", () => {
+    state.todoShowFavoritesOnly = !state.todoShowFavoritesOnly;
+    persist();
+    render();
+  });
+  els.completedFilterBtn.addEventListener("click", () => {
+    state.todoShowCompleted = !state.todoShowCompleted;
+    persist();
+    render();
+  });
+  els.calendarViewBtn.addEventListener("click", () => {
+    state.todoViewMode = "calendar";
+    persist();
+    render();
+  });
+  els.calendarMonthBtn.addEventListener("click", () => {
+    state.todoCalendarMode = "month";
+    persist();
+    render();
+  });
+  els.calendarWeekBtn.addEventListener("click", () => {
+    state.todoCalendarMode = "week";
+    persist();
+    render();
+  });
+  els.calendarDayBtn.addEventListener("click", () => {
+    state.todoCalendarMode = "day";
+    persist();
+    render();
+  });
+  els.calendarPrevBtn.addEventListener("click", () => shiftCalendar(-1));
+  els.calendarNextBtn.addEventListener("click", () => shiftCalendar(1));
+  els.calendarTodayBtn.addEventListener("click", () => {
+    setCalendarAnchorDate(getToday());
+    persist();
+    render();
+  });
+  els.modalCloseBtn.addEventListener("click", closeModal);
+  els.cancelBtn.addEventListener("click", closeModal);
+  els.saveBtn.addEventListener("click", saveTodo);
+  els.completeBtn.addEventListener("click", completeFromModal);
+  els.copyBtn.addEventListener("click", copySchedule);
+  els.deleteBtn.addEventListener("click", deleteTodo);
+  els.deleteConfirmCancelBtn.addEventListener("click", closeDeleteConfirm);
+  els.deleteConfirmOkBtn.addEventListener("click", confirmDeleteTodo);
+  els.deleteConfirmModal.addEventListener("click", (event) => {
+    if (event.target === els.deleteConfirmModal) closeDeleteConfirm();
+  });
+  els.modal.addEventListener("click", (event) => {
+    if (event.target === els.modal) closeModal();
+  });
+  document.addEventListener("keydown", (event) => {
+    if (event.key === "Escape" && els.deleteConfirmModal.classList.contains("open")) {
+      closeDeleteConfirm();
+      return;
+    }
+    if (event.key === "Escape" && els.modal.classList.contains("open")) {
+      closeModal();
+    }
+  });
+
+  ensureTodoState();
+  render();
+  startReminderLoop();
+  tabAlertTimer = setInterval(updateTodoTabAlert, 30000);
+
+  return {
+    onTabChange(isActive) {
+      isTabActive = isActive;
+      if (!isActive) {
+        closeModal();
+      }
+      render();
+    },
+    focusAlert() {
+      if (currentAlertTodoId) {
+        openModal(currentAlertTodoId);
+      }
+    },
+    destroy() {
+      if (tabAlertTimer) clearInterval(tabAlertTimer);
+      if (reminderTimer) clearInterval(reminderTimer);
+      setTabAlert("todo", "todo", false);
+      setTabAlert("todo", "todo-overdue", false);
+      setGlobalTodoAlert("", "");
+    }
+  };
+}
+
 // FILE: .\v1.4\app\lunch\view.js
 const lunchTemplate = `
 <section class="card lunch-card">
-  <div class="lunch-header">
-    <div>
-      <h2>점메추</h2>
-      <p class="hint">현재 위치를 기준으로 근처 식당을 불러오고, 선택한 카테고리에 맞는 곳만 보여줘</p>
+  <div class="lunch-top-layout">
+    <div class="lunch-top-main">
+      <div class="lunch-header">
+        <h2>점메추</h2>
+        <span id="lunchAlertBadge" class="lunch-alert-badge" hidden>점심시간 임박!!</span>
+        <button id="lunchScheduleBtn" type="button" class="lunch-schedule-inline">
+          <span class="lunch-schedule-inline-label">회사 점심시간</span>
+          <strong id="lunchTimeSummary" class="lunch-schedule-inline-value">등록해주세요!</strong>
+        </button>
+      </div>
+      <div id="lunchLocationStatus" class="lunch-location-status">위치 권한을 허용하면 근처 식당을 실시간으로 불러와요.</div>
     </div>
-    <div class="lunch-actions">
-      <button id="lunchFavoritesOnlyBtn" class="btn btn-muted">즐겨찾기만 보기</button>
-      <button id="lunchRefreshBtn" class="btn btn-muted">위치 새로고침</button>
-      <button id="lunchLocateBtn" class="btn btn-primary">현재 위치로 불러오기</button>
+    <div class="lunch-top-side">
+      <div class="lunch-actions">
+        <button id="lunchDrawBtn" class="btn btn-primary">오늘 메뉴 뽑기</button>
+        <button id="lunchRefreshBtn" class="btn btn-muted">위치 새로고침</button>
+        <button id="lunchLocateBtn" class="btn btn-primary">현재 위치로 불러오기</button>
+      </div>
     </div>
   </div>
-  <div id="lunchLocationStatus" class="lunch-location-status">위치 권한을 허용하면 근처 식당을 실시간으로 불러와요.</div>
-  <div class="lunch-filter-row">
-    <!-- Kakao Local API key input can be restored here later if the project switches back from Overpass. -->
-    <label class="field lunch-search-field">
-      <span>결과 내 검색</span>
-      <input id="lunchSearchInput" type="search" placeholder="식당명, 메뉴, 주소로 검색" />
-    </label>
+  <div class="lunch-category-row">
+    <div class="lunch-category-stack">
+      <div id="lunchCategoryBar" class="lunch-category-bar" role="tablist" aria-label="점심 카테고리"></div>
+      <div id="lunchResultMeta" class="lunch-result-meta"></div>
+    </div>
+    <div class="lunch-search-controls">
+      <div class="lunch-filter-tools">
+        <div class="todo-filter-card lunch-filter-card">
+          <div class="todo-filter-card-label">필터</div>
+          <div class="lunch-list-filters">
+            <button id="lunchFavoritesOnlyBtn" type="button" class="todo-filter-btn" aria-pressed="false" title="즐겨찾는 장소만 보여줘" data-tooltip="즐겨찾는 장소만 보여줘">★</button>
+          </div>
+        </div>
+      </div>
+      <div class="lunch-filter-row">
+        <label class="field lunch-search-field">
+          <span>결과 내 검색</span>
+          <input id="lunchSearchInput" type="search" placeholder="식당명, 메뉴, 주소로 검색" />
+        </label>
+      </div>
+    </div>
   </div>
-  <div id="lunchCategoryBar" class="lunch-category-bar" role="tablist" aria-label="점심 카테고리"></div>
-  <div id="lunchResultMeta" class="lunch-result-meta"></div>
   <div id="lunchList" class="lunch-list"></div>
   <div id="lunchPagination" class="lunch-pagination"></div>
+
+  <div id="lunchDrawModal" class="lunch-draw-modal" aria-hidden="true">
+    <div class="lunch-draw-panel">
+      <button id="lunchDrawCloseBtn" type="button" class="btn btn-muted lunch-draw-close" aria-label="점메추 뽑기 닫기">✕</button>
+      <div class="bookmark-modal-kicker">오늘의 선택</div>
+      <h3 class="lunch-draw-title">오늘 메뉴 뽑기</h3>
+      <div class="lunch-draw-controls">
+        <label class="lunch-draw-check">
+          <input id="lunchDrawFavoritesOnlyInput" type="checkbox" />
+          <span>즐겨찾는 장소만 뽑기</span>
+        </label>
+        <label class="field lunch-draw-category-field">
+          <span>카테고리</span>
+          <select id="lunchDrawCategorySelect"></select>
+        </label>
+      </div>
+      <div id="lunchDrawError" class="bookmark-modal-error" aria-live="polite"></div>
+      <div id="lunchDrawStage" class="lunch-draw-stage">
+        <div class="lunch-draw-stage-label">랜덤 선택 중</div>
+        <div id="lunchDrawPreview" class="lunch-draw-preview">
+          <div class="lunch-draw-preview-name">식당 목록을 불러오면 뽑기를 시작할 수 있어요.</div>
+          <div class="lunch-draw-preview-meta">현재 위치 식당 데이터가 필요해요.</div>
+        </div>
+      </div>
+      <div id="lunchDrawResult" class="lunch-draw-result" hidden></div>
+      <div class="button-row">
+        <button id="lunchDrawStartBtn" type="button" class="btn btn-primary">뽑기 시작</button>
+        <button id="lunchDrawMapBtn" type="button" class="btn btn-muted" hidden>지도보기</button>
+      </div>
+    </div>
+  </div>
+
+  <div id="lunchScheduleModal" class="lunch-draw-modal" aria-hidden="true">
+    <div class="lunch-draw-panel lunch-schedule-panel">
+      <button id="lunchScheduleCloseBtn" type="button" class="btn btn-muted lunch-draw-close" aria-label="회사 점심시간 설정 닫기">✕</button>
+      <div class="bookmark-modal-kicker">회사 설정</div>
+      <h3 class="lunch-draw-title">회사 점심시간 설정</h3>
+      <div class="lunch-draw-controls lunch-schedule-controls">
+        <label class="field">
+          <span>회사 점심 시작</span>
+          <input id="lunchScheduleStartInput" type="time" />
+        </label>
+        <label class="field">
+          <span>회사 점심 종료</span>
+          <input id="lunchScheduleEndInput" type="time" />
+        </label>
+      </div>
+      <div id="lunchScheduleError" class="bookmark-modal-error" aria-live="polite"></div>
+      <div class="button-row">
+        <button id="lunchScheduleCancelBtn" type="button" class="btn btn-muted">취소</button>
+        <button id="lunchScheduleSaveBtn" type="button" class="btn btn-primary">저장</button>
+      </div>
+    </div>
+  </div>
 </section>
 `;
 
 
 // FILE: .\v1.4\app\lunch\lunch.js
-const PAGE_SIZE = 10;
+const PAGE_SIZE = 12;
 const SEARCH_RADIUS_METERS = 1800;
 const OVERPASS_URL = "https://overpass-api.de/api/interpreter";
 
@@ -1435,15 +3885,35 @@ const cuisineMatchers = {
 // ever wants higher place coverage and the team is okay with API key usage/quota.
 function initLunchTab(root, { state, persist }) {
   const els = {
+    drawBtn: root.querySelector("#lunchDrawBtn"),
+    alertBadge: root.querySelector("#lunchAlertBadge"),
     locateBtn: root.querySelector("#lunchLocateBtn"),
     refreshBtn: root.querySelector("#lunchRefreshBtn"),
     favoritesOnlyBtn: root.querySelector("#lunchFavoritesOnlyBtn"),
+    scheduleBtn: root.querySelector("#lunchScheduleBtn"),
+    timeSummary: root.querySelector("#lunchTimeSummary"),
     searchInput: root.querySelector("#lunchSearchInput"),
     locationStatus: root.querySelector("#lunchLocationStatus"),
     categoryBar: root.querySelector("#lunchCategoryBar"),
     resultMeta: root.querySelector("#lunchResultMeta"),
     list: root.querySelector("#lunchList"),
-    pagination: root.querySelector("#lunchPagination")
+    pagination: root.querySelector("#lunchPagination"),
+    drawModal: root.querySelector("#lunchDrawModal"),
+    drawCloseBtn: root.querySelector("#lunchDrawCloseBtn"),
+    drawFavoritesOnlyInput: root.querySelector("#lunchDrawFavoritesOnlyInput"),
+    drawCategorySelect: root.querySelector("#lunchDrawCategorySelect"),
+    drawError: root.querySelector("#lunchDrawError"),
+    drawPreview: root.querySelector("#lunchDrawPreview"),
+    drawResult: root.querySelector("#lunchDrawResult"),
+    drawStartBtn: root.querySelector("#lunchDrawStartBtn"),
+    drawMapBtn: root.querySelector("#lunchDrawMapBtn"),
+    scheduleModal: root.querySelector("#lunchScheduleModal"),
+    scheduleCloseBtn: root.querySelector("#lunchScheduleCloseBtn"),
+    scheduleCancelBtn: root.querySelector("#lunchScheduleCancelBtn"),
+    scheduleSaveBtn: root.querySelector("#lunchScheduleSaveBtn"),
+    scheduleStartInput: root.querySelector("#lunchScheduleStartInput"),
+    scheduleEndInput: root.querySelector("#lunchScheduleEndInput"),
+    scheduleError: root.querySelector("#lunchScheduleError")
   };
 
   let isFetching = false;
@@ -1451,12 +3921,61 @@ function initLunchTab(root, { state, persist }) {
   let allPlaces = [];
   let didAutoLoad = false;
   let categoryBarInitialized = false;
+  let isDrawing = false;
+  let selectedDrawPlaceId = "";
+  let tabAlertTimer = null;
+
+  if (els.drawModal && els.drawModal.parentElement !== document.body) {
+    document.body.appendChild(els.drawModal);
+  }
+  if (els.scheduleModal && els.scheduleModal.parentElement !== document.body) {
+    document.body.appendChild(els.scheduleModal);
+  }
+
+  function getFavoriteIconMarkup(active) {
+    return `
+      <svg viewBox="0 0 24 24" aria-hidden="true" focusable="false" class="lunch-favorite-icon">
+        <path
+          d="M12 3.8l2.35 4.76a1.4 1.4 0 0 0 1.05.77l5.25.76-3.8 3.71a1.4 1.4 0 0 0-.4 1.23l.9 5.23-4.7-2.47a1.4 1.4 0 0 0-1.3 0l-4.7 2.47.9-5.23a1.4 1.4 0 0 0-.4-1.23l-3.8-3.71 5.25-.76a1.4 1.4 0 0 0 1.05-.77Z"
+          ${active ? 'fill="currentColor" stroke="none"' : 'fill="none" stroke="currentColor" stroke-width="1.8" stroke-linejoin="round"'}
+        />
+      </svg>
+    `;
+  }
+
+  function escapeHtml(value) {
+    return String(value ?? "")
+      .replace(/&/g, "&amp;")
+      .replace(/</g, "&lt;")
+      .replace(/>/g, "&gt;")
+      .replace(/"/g, "&quot;")
+      .replace(/'/g, "&#39;");
+  }
+
+  function getRegisteredImageUrl(tags = {}) {
+    const directImage = [
+      tags.image,
+      tags["image:0"],
+      tags["contact:image"]
+    ].find((value) => /^https?:\/\//i.test(String(value || "").trim()));
+    if (directImage) return directImage;
+    const wikimediaCommons = String(tags.wikimedia_commons || "").trim();
+    if (wikimediaCommons) {
+      const fileName = wikimediaCommons.replace(/^File:/i, "").replace(/ /g, "_");
+      if (fileName) {
+        return `https://commons.wikimedia.org/wiki/Special:FilePath/${encodeURIComponent(fileName)}`;
+      }
+    }
+    return "";
+  }
 
   function ensureLunchState() {
     state.lunchCategory = lunchCategories.includes(state.lunchCategory) ? state.lunchCategory : CATEGORY_KOREAN;
     state.lunchSearchQuery = state.lunchSearchQuery || "";
     state.lunchFavorites = Array.isArray(state.lunchFavorites) ? state.lunchFavorites : [];
     state.lunchFavoritesOnly = Boolean(state.lunchFavoritesOnly);
+    state.lunchStartTime = /^\d{2}:\d{2}$/.test(state.lunchStartTime || "") ? state.lunchStartTime : "";
+    state.lunchEndTime = /^\d{2}:\d{2}$/.test(state.lunchEndTime || "") ? state.lunchEndTime : "";
     state.lunchCachedPlaces = Array.isArray(state.lunchCachedPlaces) ? state.lunchCachedPlaces : [];
     state.lunchLastLocation = state.lunchLastLocation && typeof state.lunchLastLocation === "object" ? state.lunchLastLocation : null;
     state.lunchLastFetchAt = state.lunchLastFetchAt || "";
@@ -1562,6 +4081,15 @@ function initLunchTab(root, { state, persist }) {
     return `https://www.openstreetmap.org/?mlat=${place.lat}&mlon=${place.lon}#map=18/${place.lat}/${place.lon}`;
   }
 
+  function getPlaceById(placeId) {
+    return allPlaces.find((place) => place.id === placeId) || null;
+  }
+
+  function wait(ms) {
+    return new Promise((resolve) => {
+      window.setTimeout(resolve, ms);
+    });
+  }
   function mapElementToPlace(element) {
     const lat = element.lat ?? element.center?.lat;
     const lon = element.lon ?? element.center?.lon;
@@ -1689,6 +4217,199 @@ out center tags;
       });
   }
 
+  function syncLunchScheduleUi() {
+    const hasLunchSchedule = Boolean(state.lunchStartTime && state.lunchEndTime);
+
+    if (els.timeSummary) {
+      els.timeSummary.textContent = hasLunchSchedule ? `${state.lunchStartTime}~${state.lunchEndTime}` : "회사 점심시간을 등록해주세요!";
+    }
+
+    if (els.scheduleBtn) {
+      els.scheduleBtn.classList.toggle("needs-input", !hasLunchSchedule);
+    }
+
+    if (els.scheduleStartInput && els.scheduleStartInput.value !== state.lunchStartTime) {
+      els.scheduleStartInput.value = state.lunchStartTime;
+    }
+    if (els.scheduleEndInput && els.scheduleEndInput.value !== state.lunchEndTime) {
+      els.scheduleEndInput.value = state.lunchEndTime;
+    }
+  }
+
+  function getLunchAlertState() {
+    ensureLunchState();
+    if (!state.lunchStartTime || !state.lunchEndTime) return { active: false, imminent: false, text: "" };
+
+    const startSeconds = timeToSeconds(state.lunchStartTime);
+    const endSeconds = timeToSeconds(state.lunchEndTime);
+    if (startSeconds == null || endSeconds == null) return { active: false, imminent: false, text: "" };
+
+    const startMinutes = Math.floor(startSeconds / 60);
+    const endMinutes = Math.floor(endSeconds / 60);
+    if (endMinutes <= startMinutes) return { active: false, imminent: false, text: "" };
+
+    const now = new Date();
+    const currentMinutes = (now.getHours() * 60) + now.getMinutes();
+    if (currentMinutes >= (startMinutes - 30) && currentMinutes < startMinutes) {
+      return { active: true, imminent: true, text: "점심시간 임박!!" };
+    }
+    if (currentMinutes >= startMinutes && currentMinutes <= endMinutes) {
+      return { active: true, imminent: false, text: "점심시간" };
+    }
+    return { active: false, imminent: false, text: "" };
+  }
+
+  function updateLunchTabAlert() {
+    const alertState = getLunchAlertState();
+    setTabAlert("lunch", "lunch", alertState.active);
+    setGlobalLunchAlert(alertState.active, alertState.text || "점심시간 임박!!");
+    els.drawBtn?.classList.toggle("lunch-cta-alert", alertState.imminent);
+    if (els.alertBadge) {
+      els.alertBadge.hidden = !alertState.active;
+      els.alertBadge.style.display = alertState.active ? "inline-flex" : "none";
+      els.alertBadge.textContent = alertState.text || "점심시간 임박!!";
+    }
+  }
+
+  function openScheduleModal() {
+    ensureLunchState();
+    syncLunchScheduleUi();
+    if (els.scheduleError) els.scheduleError.textContent = "";
+    els.scheduleModal?.classList.add("open");
+    els.scheduleModal?.setAttribute("aria-hidden", "false");
+    requestAnimationFrame(() => els.scheduleStartInput?.focus());
+  }
+
+  function closeScheduleModal() {
+    els.scheduleModal?.classList.remove("open");
+    els.scheduleModal?.setAttribute("aria-hidden", "true");
+    if (els.scheduleError) els.scheduleError.textContent = "";
+  }
+
+  function saveSchedule() {
+    const startValue = els.scheduleStartInput?.value || "";
+    const endValue = els.scheduleEndInput?.value || "";
+
+    if (!startValue || !endValue) {
+      if (els.scheduleError) els.scheduleError.textContent = "회사 점심 시작과 종료 시간을 모두 입력해 주세요.";
+      return;
+    }
+
+    if (timeToSeconds(endValue) <= timeToSeconds(startValue)) {
+      if (els.scheduleError) els.scheduleError.textContent = "점심 종료 시간은 시작 시간보다 뒤여야 해요.";
+      return;
+    }
+
+    state.lunchStartTime = startValue;
+    state.lunchEndTime = endValue;
+    persist();
+    syncLunchScheduleUi();
+    updateLunchTabAlert();
+    render();
+    closeScheduleModal();
+  }
+
+  function getDrawCandidates() {
+    const category = els.drawCategorySelect?.value || CATEGORY_ALL;
+    const favoritesOnly = Boolean(els.drawFavoritesOnlyInput?.checked);
+
+    return allPlaces.filter((place) => {
+      if (category !== CATEGORY_ALL && !matchesCategory(place, category)) return false;
+      if (favoritesOnly && !isFavorite(place.id)) return false;
+      return true;
+    });
+  }
+
+  function populateDrawCategorySelect() {
+    if (!els.drawCategorySelect) return;
+    const currentValue = els.drawCategorySelect.value || CATEGORY_ALL;
+    els.drawCategorySelect.innerHTML = lunchCategories
+      .map((category) => `<option value="${category}" ${category === currentValue ? "selected" : ""}>${category}</option>`)
+      .join("");
+  }
+
+  function setDrawError(message = "") {
+    if (els.drawError) {
+      els.drawError.textContent = message;
+    }
+  }
+
+  function setDrawPreview(place = null) {
+    if (!els.drawPreview) return;
+
+    if (!place) {
+      els.drawPreview.innerHTML = `
+        <div class="lunch-draw-preview-name">식당 목록을 불러오면 뽑기를 시작할 수 있어요.</div>
+        <div class="lunch-draw-preview-meta">현재 위치 식당 데이터가 필요해요.</div>
+      `;
+      return;
+    }
+
+    els.drawPreview.innerHTML = `
+      <div class="lunch-draw-preview-name">${escapeHtml(place.tags.name)}</div>
+      <div class="lunch-draw-preview-meta">${escapeHtml(getPlaceCategoryLabel(place))} · ${escapeHtml(formatDistance(place.distanceMeters))} · ${escapeHtml(place.address)}</div>
+    `;
+  }
+
+  function setDrawResult(place = null) {
+    if (!els.drawResult || !els.drawMapBtn) return;
+
+    if (!place) {
+      els.drawResult.hidden = true;
+      els.drawResult.innerHTML = "";
+      els.drawMapBtn.hidden = true;
+      return;
+    }
+
+    els.drawResult.hidden = false;
+    els.drawResult.innerHTML = `
+      <div class="lunch-draw-result-kicker">오늘의 점심</div>
+      <div class="lunch-draw-result-name">${escapeHtml(place.tags.name)}</div>
+      <div class="lunch-draw-result-meta">${escapeHtml(getPlaceCategoryLabel(place))} · ${escapeHtml(place.cuisineLabel)}</div>
+      <div class="lunch-draw-result-copy">${escapeHtml(place.address)}</div>
+    `;
+    els.drawMapBtn.hidden = false;
+  }
+
+  function syncDrawControls() {
+    if (els.drawFavoritesOnlyInput) {
+      els.drawFavoritesOnlyInput.disabled = isDrawing;
+    }
+    if (els.drawCategorySelect) {
+      els.drawCategorySelect.disabled = isDrawing;
+    }
+    if (els.drawStartBtn) {
+      els.drawStartBtn.disabled = isDrawing;
+      els.drawStartBtn.textContent = isDrawing ? "뽑는 중..." : "뽑기 시작";
+    }
+  }
+
+  function clearDrawState({ keepResult = false } = {}) {
+    isDrawing = false;
+    selectedDrawPlaceId = "";
+    if (!keepResult) {
+      setDrawResult(null);
+    }
+    syncDrawControls();
+  }
+
+  function openDrawModal() {
+    populateDrawCategorySelect();
+    clearDrawState();
+    setDrawError("");
+    setDrawPreview(null);
+    els.drawFavoritesOnlyInput.checked = false;
+    els.drawModal.classList.add("open");
+    els.drawModal.setAttribute("aria-hidden", "false");
+  }
+
+  function closeDrawModal() {
+    clearDrawState();
+    els.drawModal.classList.remove("open");
+    els.drawModal.setAttribute("aria-hidden", "true");
+    render();
+  }
+
   function captureItemPositions() {
     return new Map(
       Array.from(els.list.querySelectorAll("[data-place-id]")).map((item) => [
@@ -1786,14 +4507,15 @@ out center tags;
     ensureLunchState();
     const previousPositions = captureItemPositions();
     renderCategoryBar();
+    syncLunchScheduleUi();
+    updateLunchTabAlert();
 
     if (els.searchInput.value !== state.lunchSearchQuery) {
       els.searchInput.value = state.lunchSearchQuery;
     }
 
-    els.favoritesOnlyBtn.classList.toggle("btn-primary", state.lunchFavoritesOnly);
-    els.favoritesOnlyBtn.classList.toggle("btn-muted", !state.lunchFavoritesOnly);
-    els.favoritesOnlyBtn.textContent = state.lunchFavoritesOnly ? "전체 보기" : "즐겨찾기만 보기";
+    els.favoritesOnlyBtn.classList.toggle("active", state.lunchFavoritesOnly);
+    els.favoritesOnlyBtn.setAttribute("aria-pressed", state.lunchFavoritesOnly ? "true" : "false");
 
     const filtered = getFilteredPlaces();
     const totalCount = filtered.length;
@@ -1822,6 +4544,9 @@ out center tags;
 
     els.list.innerHTML = visible.map((place) => `
       <article class="lunch-item${isFavorite(place.id) ? " favorite" : ""}" data-place-id="${place.id}">
+        ${getRegisteredImageUrl(place.tags)
+          ? `<img class="lunch-thumb" src="${getRegisteredImageUrl(place.tags)}" alt="${place.tags.name} 대표 이미지" loading="lazy" />`
+          : ""}
         <div class="lunch-item-top">
           <div>
             <h3>${place.tags.name}</h3>
@@ -1829,7 +4554,7 @@ out center tags;
           </div>
           <div class="lunch-item-actions">
             <span class="lunch-badge">${state.lunchCategory === CATEGORY_ALL ? getPlaceCategoryLabel(place) : state.lunchCategory}</span>
-            <button type="button" class="lunch-favorite-btn${isFavorite(place.id) ? " active" : ""}" data-favorite-id="${place.id}" aria-label="즐겨찾기">${isFavorite(place.id) ? "★" : "☆"}</button>
+            <button type="button" class="lunch-favorite-btn${isFavorite(place.id) ? " active" : ""}" data-favorite-id="${place.id}" aria-label="즐겨찾기">${getFavoriteIconMarkup(isFavorite(place.id))}</button>
           </div>
         </div>
         <p class="lunch-copy">${place.address}</p>
@@ -1837,8 +4562,8 @@ out center tags;
           <span>${formatDistance(place.distanceMeters)}</span>
           <span>${place.tags.amenity || "eatery"}</span>
         </div>
-        <div class="lunch-links">
-          <a href="${getOpenStreetMapLink(place)}" target="_blank" rel="noreferrer">지도 보기</a>
+        <div class="lunch-card-footer">
+          <a class="btn btn-muted lunch-map-btn" href="${getOpenStreetMapLink(place)}" target="_blank" rel="noreferrer">지도보기</a>
         </div>
       </article>
     `).join("");
@@ -1846,9 +4571,54 @@ out center tags;
     els.list.querySelectorAll("[data-favorite-id]").forEach((button) => {
       button.addEventListener("click", () => toggleFavorite(button.dataset.favoriteId));
     });
-
     animateListReorder(previousPositions);
     renderPagination(totalCount);
+  }
+
+  async function runLunchDraw() {
+    if (isDrawing) return;
+
+    const candidates = getDrawCandidates();
+    if (!candidates.length) {
+      setDrawError("조건에 맞는 식당이 없어요. 즐겨찾기나 카테고리를 다시 골라보세요.");
+      setDrawResult(null);
+      setDrawPreview(null);
+      return;
+    }
+
+    isDrawing = true;
+    selectedDrawPlaceId = "";
+    setDrawError("");
+    setDrawResult(null);
+    syncDrawControls();
+
+    const sequence = [];
+    const stepCount = 24;
+    for (let index = 0; index < stepCount; index += 1) {
+      sequence.push(candidates[Math.floor(Math.random() * candidates.length)]);
+    }
+    const winner = candidates[Math.floor(Math.random() * candidates.length)];
+    sequence.push(winner);
+    const startDelay = 45;
+    const endDelay = 210;
+    const delays = sequence.map((_, index) => {
+      const progress = sequence.length === 1 ? 1 : index / (sequence.length - 1);
+      const eased = progress ** 2.2;
+      return Math.round(startDelay + (endDelay - startDelay) * eased);
+    });
+
+    for (let index = 0; index < sequence.length; index += 1) {
+      const place = sequence[index];
+      selectedDrawPlaceId = place.id;
+      setDrawPreview(place);
+      await wait(delays[index]);
+    }
+
+    isDrawing = false;
+    selectedDrawPlaceId = winner.id;
+    setDrawPreview(winner);
+    setDrawResult(winner);
+    syncDrawControls();
   }
 
   function requestCurrentPosition() {
@@ -1918,6 +4688,38 @@ out center tags;
 
   els.locateBtn.addEventListener("click", () => loadNearbyRestaurants(false));
   els.refreshBtn.addEventListener("click", () => loadNearbyRestaurants(true));
+  els.drawBtn?.addEventListener("click", openDrawModal);
+  els.scheduleBtn?.addEventListener("click", openScheduleModal);
+  els.drawCloseBtn?.addEventListener("click", closeDrawModal);
+  els.scheduleCloseBtn?.addEventListener("click", closeScheduleModal);
+  els.scheduleCancelBtn?.addEventListener("click", closeScheduleModal);
+  els.scheduleSaveBtn?.addEventListener("click", saveSchedule);
+  els.drawModal?.addEventListener("click", (event) => {
+    if (event.target === els.drawModal) {
+      closeDrawModal();
+    }
+  });
+  els.scheduleModal?.addEventListener("click", (event) => {
+    if (event.target === els.scheduleModal) {
+      closeScheduleModal();
+    }
+  });
+  els.drawStartBtn?.addEventListener("click", () => {
+    runLunchDraw();
+  });
+  els.drawMapBtn?.addEventListener("click", () => {
+    const place = getPlaceById(selectedDrawPlaceId || winnerPlaceId);
+    if (!place) return;
+    window.open(getOpenStreetMapLink(place), "_blank", "noopener,noreferrer");
+  });
+  els.drawCategorySelect?.addEventListener("change", () => {
+    setDrawError("");
+    setDrawResult(null);
+  });
+  els.drawFavoritesOnlyInput?.addEventListener("change", () => {
+    setDrawError("");
+    setDrawResult(null);
+  });
   els.favoritesOnlyBtn.addEventListener("click", () => {
     ensureLunchState();
     state.lunchFavoritesOnly = !state.lunchFavoritesOnly;
@@ -1932,18 +4734,43 @@ out center tags;
     render();
   });
   window.addEventListener("resize", updateCategoryIndicator);
+  window.addEventListener("keydown", (event) => {
+    if (event.key === "Escape" && els.drawModal?.classList.contains("open")) {
+      closeDrawModal();
+      return;
+    }
+    if (event.key === "Escape" && els.scheduleModal?.classList.contains("open")) {
+      closeScheduleModal();
+    }
+  });
 
   restoreCachedPlaces();
   render();
+  tabAlertTimer = setInterval(updateLunchTabAlert, 30000);
 
   return {
     onTabChange(isActive) {
+      if (!isActive && els.drawModal?.classList.contains("open")) {
+        closeDrawModal();
+      }
+      if (!isActive && els.scheduleModal?.classList.contains("open")) {
+        closeScheduleModal();
+      }
       if (isActive && !didAutoLoad) {
         didAutoLoad = true;
         if (!allPlaces.length) {
           loadNearbyRestaurants(false);
         }
       }
+    },
+    focusAlert() {
+      els.drawBtn?.focus();
+      root.querySelector(".lunch-card")?.scrollIntoView({ behavior: "smooth", block: "start" });
+    },
+    destroy() {
+      if (tabAlertTimer) clearInterval(tabAlertTimer);
+      setTabAlert("lunch", "lunch", false);
+      setGlobalLunchAlert(false);
     }
   };
 }
@@ -2333,6 +5160,17 @@ function initLadderTab(root, { state, persist }) {
     }
   }
 
+  function resetTransientRunState(shouldRender = true) {
+    clearResultTimer();
+    closeResultModal();
+    activePlayerIndex = null;
+    showAllPaths = false;
+    reverseTravel = false;
+    if (shouldRender) {
+      renderBoard();
+    }
+  }
+
   function closeResultModal() {
     els.resultModal.classList.remove("open");
     els.resultModal.setAttribute("aria-hidden", "true");
@@ -2551,8 +5389,7 @@ function initLadderTab(root, { state, persist }) {
 
   function generateLadder() {
     syncStateFromInputs();
-    clearResultTimer();
-    closeResultModal();
+    resetTransientRunState(false);
     ladderData = {
       names: getNames(),
       results: getResults(),
@@ -2616,15 +5453,20 @@ function initLadderTab(root, { state, persist }) {
     const playerCount = ladderData.names.length;
     const compact = playerCount >= 10;
     const orientation = state.ladderOrientation;
-    const colSpacing = compact ? 74 : 96;
-    const rowGap = compact ? 44 : 52;
-    const paddingX = compact ? 26 : 48;
-    const railTop = 18;
-    const railBottom = railTop + ladderData.rows.length * rowGap;
-    const svgWidth = paddingX * 2 + colSpacing * (playerCount - 1);
-    const svgHeight = railBottom + 18;
-    const xFor = (index) => paddingX + colSpacing * index;
-    const yForRow = (rowIndex) => railTop + rowGap * rowIndex + rowGap / 2;
+    const svgHeight = compact ? 460 : 520;
+    const horizontalMainLength = compact ? 620 : 720;
+    const railPadding = orientation === "horizontal" ? 2 : (compact ? 22 : 26);
+    const railStart = railPadding;
+    const railEnd = (orientation === "horizontal" ? horizontalMainLength : svgHeight) - railPadding;
+    const rowGap = (railEnd - railStart) / Math.max(1, ladderData.rows.length);
+    const nodeGap = compact ? 6 : 10;
+    const cardWidth = compact ? 70 : 120;
+    const cardHeight = compact ? 52 : 70;
+    const laneSize = orientation === "vertical" ? cardWidth : cardHeight;
+    const laneStride = laneSize + nodeGap;
+    const svgWidth = playerCount * laneSize + Math.max(0, playerCount - 1) * nodeGap;
+    const xFor = (index) => laneStride * index + laneSize / 2;
+    const yForRow = (rowIndex) => railStart + rowGap * rowIndex + rowGap / 2;
 
     const topHtml = ladderData.names.map((name, index) => `
       <button type="button" class="ladder-node top${activePlayerIndex === index && !showAllPaths ? " pending-active" : ""}${activePlayerIndex === index && activeEndsFail && !showAllPaths ? " fail-delayed" : ""}${activePlayerIndex === index && activeEndsSuccess && !showAllPaths ? " success-delayed" : ""}${showAllPaths && failPlayerIndexes.has(index) ? " fail-delayed" : ""}${showAllPaths && !failPlayerIndexes.has(index) ? " success-delayed" : ""}" data-player-index="${index}" data-node-position="top">
@@ -2635,8 +5477,8 @@ function initLadderTab(root, { state, persist }) {
 
     const railsSvg = ladderData.names.map((_, index) => `
       ${orientation === "vertical"
-        ? `<line class="ladder-svg-rail" x1="${xFor(index)}" y1="${railTop}" x2="${xFor(index)}" y2="${railBottom}"></line>`
-        : `<line class="ladder-svg-rail" x1="${railTop}" y1="${xFor(index)}" x2="${railBottom}" y2="${xFor(index)}"></line>`}
+        ? `<line class="ladder-svg-rail" x1="${xFor(index)}" y1="${railStart}" x2="${xFor(index)}" y2="${railEnd}"></line>`
+        : `<line class="ladder-svg-rail" x1="${railStart}" y1="${xFor(index)}" x2="${railEnd}" y2="${xFor(index)}"></line>`}
     `).join("");
 
     const bridgesSvg = ladderData.rows.map((row, rowIndex) => row.map((hasBridge, colIndex) => {
@@ -2654,7 +5496,7 @@ function initLadderTab(root, { state, persist }) {
       const pathParts = [];
 
       if (!reverse) {
-        pathParts.push(`M ${pointFor(trace.steps[0].col, railTop)}`);
+        pathParts.push(`M ${pointFor(trace.steps[0].col, railStart)}`);
         trace.steps.slice(1).forEach((step) => {
           const y = yForRow(step.row);
           pathParts.push(`L ${pointFor(step.col, y)}`);
@@ -2662,9 +5504,9 @@ function initLadderTab(root, { state, persist }) {
             pathParts.push(`L ${pointFor(step.horizontalTo, y)}`);
           }
         });
-        pathParts.push(`L ${pointFor(trace.endIndex, railBottom)}`);
+        pathParts.push(`L ${pointFor(trace.endIndex, railEnd)}`);
       } else {
-        pathParts.push(`M ${pointFor(trace.endIndex, railBottom)}`);
+        pathParts.push(`M ${pointFor(trace.endIndex, railEnd)}`);
         for (let i = trace.steps.length - 1; i >= 1; i -= 1) {
           const step = trace.steps[i];
           const y = yForRow(step.row);
@@ -2674,7 +5516,7 @@ function initLadderTab(root, { state, persist }) {
             pathParts.push(`L ${pointFor(step.col, y)}`);
           }
         }
-        pathParts.push(`L ${pointFor(trace.steps[0].col, railTop)}`);
+        pathParts.push(`L ${pointFor(trace.steps[0].col, railStart)}`);
       }
 
       return `<path class="${className}${endsFail ? " fail" : " success"}${reverse ? " reverse" : ""}" d="${pathParts.join(" ")}" pathLength="100"></path>`;
@@ -2709,36 +5551,37 @@ function initLadderTab(root, { state, persist }) {
         </button>
       `;
     }).join("");
+    const stageVars = `--ladder-card-width:${cardWidth}px;--ladder-card-height:${cardHeight}px;--ladder-node-gap:${nodeGap}px;`;
 
     els.board.innerHTML = orientation === "vertical" ? `
-      <div class="ladder-stage${compact ? " compact" : ""}">
-        <div class="ladder-node-row" style="grid-template-columns:repeat(${playerCount}, minmax(0, 1fr));">
+      <div class="ladder-stage${compact ? " compact" : ""}" style="${stageVars}width:${svgWidth}px;">
+        <div class="ladder-node-row" style="grid-template-columns:repeat(${playerCount}, ${cardWidth}px);gap:${nodeGap}px;">
           ${topHtml}
         </div>
-        <div class="ladder-diagram">
-          <svg class="ladder-svg" viewBox="0 0 ${svgWidth} ${svgHeight}" preserveAspectRatio="xMidYMid meet" aria-hidden="true">
+        <div class="ladder-diagram" style="width:${svgWidth}px;">
+          <svg class="ladder-svg" style="width:${svgWidth}px;height:${svgHeight}px;" viewBox="0 0 ${svgWidth} ${svgHeight}" preserveAspectRatio="none" aria-hidden="true">
             ${railsSvg}
             ${bridgesSvg}
             ${activePath}
           </svg>
         </div>
-        <div class="ladder-node-row" style="grid-template-columns:repeat(${ladderData.results.length}, minmax(0, 1fr));">
+        <div class="ladder-node-row" style="grid-template-columns:repeat(${ladderData.results.length}, ${cardWidth}px);gap:${nodeGap}px;">
           ${bottomHtml}
         </div>
       </div>
     ` : `
-      <div class="ladder-stage horizontal${compact ? " compact" : ""}">
-        <div class="ladder-side-column" style="grid-template-rows:repeat(${playerCount}, minmax(0, 1fr));">
+      <div class="ladder-stage horizontal${compact ? " compact" : ""}" style="${stageVars}grid-template-columns:${cardWidth}px minmax(0, 1fr) ${cardWidth}px;">
+        <div class="ladder-side-column" style="grid-template-rows:repeat(${playerCount}, ${cardHeight}px);gap:${nodeGap}px;width:${cardWidth}px;">
           ${topHtml}
         </div>
-        <div class="ladder-diagram horizontal">
-          <svg class="ladder-svg horizontal" viewBox="0 0 ${svgHeight} ${svgWidth}" preserveAspectRatio="xMidYMid meet" aria-hidden="true">
+        <div class="ladder-diagram horizontal" style="width:100%;height:${svgWidth}px;">
+          <svg class="ladder-svg horizontal" style="width:100%;height:${svgWidth}px;" viewBox="0 0 ${horizontalMainLength} ${svgWidth}" preserveAspectRatio="none" aria-hidden="true">
             ${railsSvg}
             ${bridgesSvg}
             ${activePath}
           </svg>
         </div>
-        <div class="ladder-side-column" style="grid-template-rows:repeat(${ladderData.results.length}, minmax(0, 1fr));">
+        <div class="ladder-side-column" style="grid-template-rows:repeat(${ladderData.results.length}, ${cardHeight}px);gap:${nodeGap}px;width:${cardWidth}px;">
           ${bottomHtml}
         </div>
       </div>
@@ -2800,6 +5643,7 @@ function initLadderTab(root, { state, persist }) {
     button.addEventListener("click", () => {
       state.ladderOrientation = button.dataset.ladderMode === "horizontal" ? "horizontal" : "vertical";
       persist();
+      resetTransientRunState(false);
       syncInputsFromState();
       saveActivePresetIfNeeded();
       renderPresetList();
@@ -2824,7 +5668,12 @@ function initLadderTab(root, { state, persist }) {
   renderPresetList();
   generateLadder();
 
-  return {};
+  return {
+    onTabChange(isActive) {
+      if (isActive) return;
+      resetTransientRunState();
+    }
+  };
 }
 
 
@@ -2832,6 +5681,8 @@ function initLadderTab(root, { state, persist }) {
 const tabConfigs = [
   { id: "tracker", template: trackerTemplate, init: initTrackerTab },
   { id: "income", template: incomeTemplate, init: initIncomeTab },
+  { id: "bookmarks", template: bookmarksTemplate, init: initBookmarksTab },
+  { id: "todo", template: todoTemplate, init: initTodoTab },
   { id: "lunch", template: lunchTemplate, init: initLunchTab },
   { id: "fortune", template: fortuneTemplate, init: initFortuneTab },
   { id: "ladder", template: ladderTemplate, init: initLadderTab }
@@ -2914,17 +5765,28 @@ function getWeatherVisual(weatherCode) {
 
 async function initWeatherWidget() {
   const summaryEl = document.getElementById("weatherSummary");
+  const updatedAtEl = document.getElementById("weatherUpdatedAt");
   const tempEl = document.getElementById("weatherTemp");
   const iconEl = document.getElementById("weatherIcon");
   const refreshBtn = document.getElementById("weatherRefreshBtn");
 
-  if (!summaryEl || !tempEl || !iconEl || !refreshBtn) return;
+  if (!summaryEl || !updatedAtEl || !tempEl || !iconEl || !refreshBtn) return;
 
-  const setWeatherState = (summary, temperature = "--°", icon = "cloud") => {
+  const formatUpdatedAt = (value) => {
+    if (!value) return "";
+    const date = new Date(value);
+    if (Number.isNaN(date.getTime())) return "";
+    const hours = String(date.getHours()).padStart(2, "0");
+    const minutes = String(date.getMinutes()).padStart(2, "0");
+    return `업데이트 ${hours}:${minutes}`;
+  };
+
+  const setWeatherState = (summary, temperature = "--°", icon = "cloud", updatedAt = "") => {
     summaryEl.textContent = summary;
     tempEl.textContent = temperature;
     iconEl.src = buildWeatherIcon(icon);
     iconEl.alt = summary;
+    updatedAtEl.textContent = formatUpdatedAt(updatedAt);
   };
 
   const setRefreshState = (disabled) => {
@@ -2935,7 +5797,7 @@ async function initWeatherWidget() {
     const cache = state.weatherCache;
     if (!cache) return false;
 
-    setWeatherState(cache.summary, cache.temperature, cache.icon);
+    setWeatherState(cache.summary, cache.temperature, cache.icon, cache.updatedAt);
     return true;
   };
 
@@ -2988,7 +5850,7 @@ async function initWeatherWidget() {
 
       state.weatherCache = nextCache;
       persist();
-      setWeatherState(nextCache.summary, nextCache.temperature, nextCache.icon);
+      setWeatherState(nextCache.summary, nextCache.temperature, nextCache.icon, nextCache.updatedAt);
     } catch (error) {
       console.error(error);
       if (!renderFromCache()) {
@@ -3006,10 +5868,117 @@ async function initWeatherWidget() {
   }
 }
 
+function getHomeGuideContent() {
+  const ua = navigator.userAgent || "";
+  const isEdge = /Edg\//.test(ua);
+  const isChrome = /Chrome\//.test(ua) && !isEdge;
+  const isFirefox = /Firefox\//.test(ua);
+  if (isEdge) {
+    return {
+      description: "Edge 설정에서 시작 페이지를 직접 지정하면 브라우저를 켤 때 이 화면이 바로 열려요.",
+      steps: [
+        "Edge 우측 상단 메뉴를 열고 설정으로 들어가세요.",
+        "시작, 홈 및 새 탭 페이지에서 브라우저 시작 시 항목을 찾으세요.",
+        "\"특정 페이지 열기\"를 선택하고 아래 주소를 추가하세요."
+      ]
+    };
+  }
+  if (isChrome) {
+    return {
+      description: "Chrome에서는 시작 그룹에 이 주소를 넣으면 브라우저 실행 직후 이 페이지가 열려요.",
+      steps: [
+        "Chrome 우측 상단 메뉴를 열고 설정으로 들어가세요.",
+        "시작 그룹에서 \"특정 페이지 또는 페이지 모음 열기\"를 선택하세요.",
+        "새 페이지 추가를 눌러 아래 주소를 붙여넣으세요."
+      ]
+    };
+  }
+  if (isFirefox) {
+    return {
+      description: "Firefox에서는 홈 설정에 이 주소를 넣으면 시작 페이지로 쓸 수 있어요.",
+      steps: [
+        "Firefox 메뉴를 열고 설정으로 들어가세요.",
+        "홈 탭에서 홈페이지 및 새 창 항목을 찾으세요.",
+        "\"사용자 지정 URL\"을 선택하고 아래 주소를 붙여넣으세요."
+      ]
+    };
+  }
+  return {
+    description: "브라우저마다 이름은 조금 다르지만, 보통 설정의 시작 페이지 또는 홈 항목에서 이 주소를 등록하면 됩니다.",
+    steps: [
+      "브라우저 설정을 여세요.",
+      "시작 페이지, 홈, 또는 브라우저 시작 시 항목을 찾으세요.",
+      "아래 주소를 복사해서 시작 페이지로 등록하세요."
+    ]
+  };
+}
+
+function initHomeGuide() {
+  const openBtn = document.getElementById("setHomeGuideBtn");
+  const modal = document.getElementById("homeGuideModal");
+  const closeBtn = document.getElementById("homeGuideCloseBtn");
+  const descriptionEl = document.getElementById("homeGuideDescription");
+  const stepsEl = document.getElementById("homeGuideSteps");
+  const urlInput = document.getElementById("homeGuideUrl");
+  const copyBtn = document.getElementById("copyHomeUrlBtn");
+  const toastEl = document.getElementById("homeGuideToast");
+  if (!openBtn || !modal || !closeBtn || !descriptionEl || !stepsEl || !urlInput || !copyBtn || !toastEl) return;
+  let toastTimer = null;
+  const pageUrl = window.location.href;
+  const content = getHomeGuideContent();
+  descriptionEl.textContent = content.description;
+  stepsEl.innerHTML = content.steps.map((step) => `<li>${step}</li>`).join("");
+  urlInput.value = pageUrl;
+  const showToast = (text) => {
+    if (toastTimer) clearTimeout(toastTimer);
+    toastEl.textContent = text;
+    toastEl.classList.add("show");
+    toastTimer = setTimeout(() => {
+      toastEl.classList.remove("show");
+    }, 1800);
+  };
+  const openModal = () => {
+    modal.classList.add("open");
+    modal.setAttribute("aria-hidden", "false");
+  };
+  const closeModal = () => {
+    modal.classList.remove("open");
+    modal.setAttribute("aria-hidden", "true");
+  };
+  openBtn.addEventListener("click", openModal);
+  closeBtn.addEventListener("click", closeModal);
+  modal.addEventListener("click", (event) => {
+    if (event.target === modal) closeModal();
+  });
+  document.addEventListener("keydown", (event) => {
+    if (event.key === "Escape") closeModal();
+  });
+  copyBtn.addEventListener("click", async () => {
+    try {
+      await navigator.clipboard.writeText(pageUrl);
+      urlInput.select();
+      showToast("시작페이지 주소를 복사했어요.");
+    } catch (error) {
+      console.error(error);
+      urlInput.focus();
+      urlInput.select();
+      showToast("복사가 막혀 있어요. 주소를 직접 복사해 주세요.");
+    }
+  });
+}
+
 async function bootstrap() {
   const host = document.getElementById("tabHost");
   initHeroZodiacMark();
+  placeGlobalLunchAlertNearTitle();
+  moveHomeGuideButtonToTabBar();
+  initHomeGuide();
   const tabs = await loadTabs(host, tabConfigs, { state, persist });
+  ["todo", "lunch"].forEach((tabId) => {
+    const tab = tabs.find((entry) => entry.id === tabId);
+    if (tab) ensureTabInitialized(tab);
+  });
+  bindGlobalAlertBadges(tabs, state, persist);
   const validTabIds = new Set(tabConfigs.map((tab) => tab.id));
   const initialTab = validTabIds.has(state.activeTab) ? state.activeTab : "tracker";
 

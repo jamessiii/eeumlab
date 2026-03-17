@@ -150,6 +150,18 @@ export function initLadderTab(root, { state, persist }) {
     }
   }
 
+  function resetTransientRunState(shouldRender = true) {
+    clearResultTimer();
+    closeResultModal();
+    activePlayerIndex = null;
+    showAllPaths = false;
+    reverseTravel = false;
+
+    if (shouldRender) {
+      renderBoard();
+    }
+  }
+
   function closeResultModal() {
     els.resultModal.classList.remove("open");
     els.resultModal.setAttribute("aria-hidden", "true");
@@ -368,8 +380,7 @@ export function initLadderTab(root, { state, persist }) {
 
   function generateLadder() {
     syncStateFromInputs();
-    clearResultTimer();
-    closeResultModal();
+    resetTransientRunState(false);
     ladderData = {
       names: getNames(),
       results: getResults(),
@@ -433,15 +444,20 @@ export function initLadderTab(root, { state, persist }) {
     const playerCount = ladderData.names.length;
     const compact = playerCount >= 10;
     const orientation = state.ladderOrientation;
-    const colSpacing = compact ? 74 : 96;
-    const rowGap = compact ? 44 : 52;
-    const paddingX = compact ? 26 : 48;
-    const railTop = 18;
-    const railBottom = railTop + ladderData.rows.length * rowGap;
-    const svgWidth = paddingX * 2 + colSpacing * (playerCount - 1);
-    const svgHeight = railBottom + 18;
-    const xFor = (index) => paddingX + colSpacing * index;
-    const yForRow = (rowIndex) => railTop + rowGap * rowIndex + rowGap / 2;
+    const svgHeight = compact ? 460 : 520;
+    const horizontalMainLength = compact ? 620 : 720;
+    const railPadding = orientation === "horizontal" ? 2 : (compact ? 22 : 26);
+    const railStart = railPadding;
+    const railEnd = (orientation === "horizontal" ? horizontalMainLength : svgHeight) - railPadding;
+    const rowGap = (railEnd - railStart) / Math.max(1, ladderData.rows.length);
+    const nodeGap = compact ? 6 : 10;
+    const cardWidth = compact ? 70 : 120;
+    const cardHeight = compact ? 52 : 70;
+    const laneSize = orientation === "vertical" ? cardWidth : cardHeight;
+    const laneStride = laneSize + nodeGap;
+    const svgWidth = playerCount * laneSize + Math.max(0, playerCount - 1) * nodeGap;
+    const xFor = (index) => laneStride * index + laneSize / 2;
+    const yForRow = (rowIndex) => railStart + rowGap * rowIndex + rowGap / 2;
 
     const topHtml = ladderData.names.map((name, index) => `
       <button type="button" class="ladder-node top${activePlayerIndex === index && !showAllPaths ? " pending-active" : ""}${activePlayerIndex === index && activeEndsFail && !showAllPaths ? " fail-delayed" : ""}${activePlayerIndex === index && activeEndsSuccess && !showAllPaths ? " success-delayed" : ""}${showAllPaths && failPlayerIndexes.has(index) ? " fail-delayed" : ""}${showAllPaths && !failPlayerIndexes.has(index) ? " success-delayed" : ""}" data-player-index="${index}" data-node-position="top">
@@ -452,8 +468,8 @@ export function initLadderTab(root, { state, persist }) {
 
     const railsSvg = ladderData.names.map((_, index) => `
       ${orientation === "vertical"
-        ? `<line class="ladder-svg-rail" x1="${xFor(index)}" y1="${railTop}" x2="${xFor(index)}" y2="${railBottom}"></line>`
-        : `<line class="ladder-svg-rail" x1="${railTop}" y1="${xFor(index)}" x2="${railBottom}" y2="${xFor(index)}"></line>`}
+        ? `<line class="ladder-svg-rail" x1="${xFor(index)}" y1="${railStart}" x2="${xFor(index)}" y2="${railEnd}"></line>`
+        : `<line class="ladder-svg-rail" x1="${railStart}" y1="${xFor(index)}" x2="${railEnd}" y2="${xFor(index)}"></line>`}
     `).join("");
 
     const bridgesSvg = ladderData.rows.map((row, rowIndex) => row.map((hasBridge, colIndex) => {
@@ -471,7 +487,7 @@ export function initLadderTab(root, { state, persist }) {
       const pathParts = [];
 
       if (!reverse) {
-        pathParts.push(`M ${pointFor(trace.steps[0].col, railTop)}`);
+        pathParts.push(`M ${pointFor(trace.steps[0].col, railStart)}`);
         trace.steps.slice(1).forEach((step) => {
           const y = yForRow(step.row);
           pathParts.push(`L ${pointFor(step.col, y)}`);
@@ -479,19 +495,19 @@ export function initLadderTab(root, { state, persist }) {
             pathParts.push(`L ${pointFor(step.horizontalTo, y)}`);
           }
         });
-        pathParts.push(`L ${pointFor(trace.endIndex, railBottom)}`);
+        pathParts.push(`L ${pointFor(trace.endIndex, railEnd)}`);
       } else {
-        pathParts.push(`M ${pointFor(trace.endIndex, railBottom)}`);
+        pathParts.push(`M ${pointFor(trace.endIndex, railEnd)}`);
         for (let i = trace.steps.length - 1; i >= 1; i -= 1) {
           const step = trace.steps[i];
           const y = yForRow(step.row);
           const currentCol = typeof step.horizontalTo === "number" ? step.horizontalTo : step.col;
           pathParts.push(`L ${pointFor(currentCol, y)}`);
-          if (typeof step.horizontalTo === "number") {
+        if (typeof step.horizontalTo === "number") {
             pathParts.push(`L ${pointFor(step.col, y)}`);
           }
         }
-        pathParts.push(`L ${pointFor(trace.steps[0].col, railTop)}`);
+        pathParts.push(`L ${pointFor(trace.steps[0].col, railStart)}`);
       }
 
       return `<path class="${className}${endsFail ? " fail" : " success"}${reverse ? " reverse" : ""}" d="${pathParts.join(" ")}" pathLength="100"></path>`;
@@ -527,35 +543,37 @@ export function initLadderTab(root, { state, persist }) {
       `;
     }).join("");
 
+    const stageVars = `--ladder-card-width:${cardWidth}px;--ladder-card-height:${cardHeight}px;--ladder-node-gap:${nodeGap}px;`;
+
     els.board.innerHTML = orientation === "vertical" ? `
-      <div class="ladder-stage${compact ? " compact" : ""}">
-        <div class="ladder-node-row" style="grid-template-columns:repeat(${playerCount}, minmax(0, 1fr));">
+      <div class="ladder-stage${compact ? " compact" : ""}" style="${stageVars}width:${svgWidth}px;">
+        <div class="ladder-node-row" style="grid-template-columns:repeat(${playerCount}, ${cardWidth}px);gap:${nodeGap}px;">
           ${topHtml}
         </div>
-        <div class="ladder-diagram">
-          <svg class="ladder-svg" viewBox="0 0 ${svgWidth} ${svgHeight}" preserveAspectRatio="xMidYMid meet" aria-hidden="true">
+        <div class="ladder-diagram" style="width:${svgWidth}px;">
+          <svg class="ladder-svg" style="width:${svgWidth}px;height:${svgHeight}px;" viewBox="0 0 ${svgWidth} ${svgHeight}" preserveAspectRatio="none" aria-hidden="true">
             ${railsSvg}
             ${bridgesSvg}
             ${activePath}
           </svg>
         </div>
-        <div class="ladder-node-row" style="grid-template-columns:repeat(${ladderData.results.length}, minmax(0, 1fr));">
+        <div class="ladder-node-row" style="grid-template-columns:repeat(${ladderData.results.length}, ${cardWidth}px);gap:${nodeGap}px;">
           ${bottomHtml}
         </div>
       </div>
     ` : `
-      <div class="ladder-stage horizontal${compact ? " compact" : ""}">
-        <div class="ladder-side-column" style="grid-template-rows:repeat(${playerCount}, minmax(0, 1fr));">
+      <div class="ladder-stage horizontal${compact ? " compact" : ""}" style="${stageVars}grid-template-columns:${cardWidth}px minmax(0, 1fr) ${cardWidth}px;">
+        <div class="ladder-side-column" style="grid-template-rows:repeat(${playerCount}, ${cardHeight}px);gap:${nodeGap}px;width:${cardWidth}px;">
           ${topHtml}
         </div>
-        <div class="ladder-diagram horizontal">
-          <svg class="ladder-svg horizontal" viewBox="0 0 ${svgHeight} ${svgWidth}" preserveAspectRatio="xMidYMid meet" aria-hidden="true">
+        <div class="ladder-diagram horizontal" style="width:100%;height:${svgWidth}px;">
+          <svg class="ladder-svg horizontal" style="width:100%;height:${svgWidth}px;" viewBox="0 0 ${horizontalMainLength} ${svgWidth}" preserveAspectRatio="none" aria-hidden="true">
             ${railsSvg}
             ${bridgesSvg}
             ${activePath}
           </svg>
         </div>
-        <div class="ladder-side-column" style="grid-template-rows:repeat(${ladderData.results.length}, minmax(0, 1fr));">
+        <div class="ladder-side-column" style="grid-template-rows:repeat(${ladderData.results.length}, ${cardHeight}px);gap:${nodeGap}px;width:${cardWidth}px;">
           ${bottomHtml}
         </div>
       </div>
@@ -617,6 +635,7 @@ export function initLadderTab(root, { state, persist }) {
     button.addEventListener("click", () => {
       state.ladderOrientation = button.dataset.ladderMode === "horizontal" ? "horizontal" : "vertical";
       persist();
+      resetTransientRunState(false);
       syncInputsFromState();
       saveActivePresetIfNeeded();
       renderPresetList();
@@ -641,5 +660,10 @@ export function initLadderTab(root, { state, persist }) {
   renderPresetList();
   generateLadder();
 
-  return {};
+  return {
+    onTabChange(isActive) {
+      if (isActive) return;
+      resetTransientRunState();
+    }
+  };
 }

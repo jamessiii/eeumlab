@@ -19,19 +19,27 @@ export const trackerTemplate = `
         <input id="monthlyGoal" type="text" placeholder="예: 250만 원 모으기" />
       </label>
     </div>
-    <div class="button-row">
-      <button id="startBtn" class="btn btn-start">지금 출근</button>
-      <button id="stopBtn" class="btn btn-stop">지금 퇴근</button>
-      <button id="editTodayBtn" class="btn btn-primary">오늘 기록 수정</button>
+    <div class="form-grid tracker-time-grid">
+      <label class="field">
+        <span>출근시간</span>
+        <input id="todayStartTime" type="time" />
+      </label>
+      <label class="field">
+        <span>퇴근시간</span>
+        <input id="todayEndTime" type="time" />
+      </label>
+      <div class="field tracker-action-field">
+        <button id="workToggleBtn" class="btn btn-start tracker-action-btn">지금 출근</button>
+      </div>
     </div>
     <div class="summary-grid">
       <article class="summary-card">
-        <div class="summary-label">오늘 번 돈</div>
+        <div class="summary-label">오늘 회사에 끼친 손해</div>
         <div id="todayMoney" class="summary-value">₩ 0</div>
         <div id="todaySub" class="summary-sub">오늘 근무시간 00:00:00</div>
       </article>
       <article class="summary-card">
-        <div class="summary-label">이번 달 번 돈</div>
+        <div class="summary-label">이번 달 회사에 끼친 손해</div>
         <div id="monthMoney" class="summary-value">₩ 0</div>
         <div id="monthSub" class="summary-sub">완료된 근무일 0일 / 0일</div>
       </article>
@@ -58,7 +66,7 @@ export const trackerTemplate = `
       <span class="status-dot"></span>
       <span id="statusText">퇴근 상태</span>
     </div>
-    <p class="hint">하루 8시간 근무, 점심 1시간 제외 기준으로 실제 반영 시급은 하루 7시간으로 계산돼.</p>
+    <p class="hint">하루 8시간 근무, 점심 1시간 제외 기준으로 실제 반영 시급은 하루 8시간으로 계산돼.</p>
   </section>
   <aside class="card calendar-card">
     <div class="calendar-header">
@@ -127,6 +135,17 @@ export const trackerTemplate = `
       </table>
     </div>
   </section>
+</div>
+<div id="workConfirmModal" class="tracker-confirm-modal" aria-hidden="true">
+  <div class="tracker-confirm-panel">
+    <div class="tracker-confirm-kicker">출퇴근 확인</div>
+    <h3 id="workConfirmTitle" class="tracker-confirm-title">처리할까요?</h3>
+    <p id="workConfirmText" class="tracker-confirm-text"></p>
+    <div class="tracker-confirm-actions">
+      <button id="workConfirmCancelBtn" type="button" class="btn btn-muted">취소</button>
+      <button id="workConfirmOkBtn" type="button" class="btn btn-primary">확인</button>
+    </div>
+  </div>
 </div>
 <div id="dayModal" class="modal" aria-hidden="true">
   <div class="modal-panel">

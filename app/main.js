@@ -4,6 +4,8 @@ import { initTrackerTab } from "./tracker/tracker.js";
 import { trackerTemplate } from "./tracker/view.js";
 import { initIncomeTab } from "./income/income.js";
 import { incomeTemplate } from "./income/view.js";
+import { initBookmarksTab } from "./bookmarks/bookmarks.js";
+import { bookmarksTemplate } from "./bookmarks/view.js";
 import { initLunchTab } from "./lunch/lunch.js";
 import { lunchTemplate } from "./lunch/view.js";
 import { initFortuneTab } from "./fortune/fortune.js";
@@ -14,6 +16,7 @@ import { ladderTemplate } from "./ladder/view.js";
 const tabConfigs = [
   { id: "tracker", template: trackerTemplate, init: initTrackerTab },
   { id: "income", template: incomeTemplate, init: initIncomeTab },
+  { id: "bookmarks", template: bookmarksTemplate, init: initBookmarksTab },
   { id: "lunch", template: lunchTemplate, init: initLunchTab },
   { id: "fortune", template: fortuneTemplate, init: initFortuneTab },
   { id: "ladder", template: ladderTemplate, init: initLadderTab }
@@ -96,17 +99,28 @@ function getWeatherVisual(weatherCode) {
 
 async function initWeatherWidget() {
   const summaryEl = document.getElementById("weatherSummary");
+  const updatedAtEl = document.getElementById("weatherUpdatedAt");
   const tempEl = document.getElementById("weatherTemp");
   const iconEl = document.getElementById("weatherIcon");
   const refreshBtn = document.getElementById("weatherRefreshBtn");
 
-  if (!summaryEl || !tempEl || !iconEl || !refreshBtn) return;
+  if (!summaryEl || !updatedAtEl || !tempEl || !iconEl || !refreshBtn) return;
 
-  const setWeatherState = (summary, temperature = "--°", icon = "cloud") => {
+  const formatUpdatedAt = (value) => {
+    if (!value) return "";
+    const date = new Date(value);
+    if (Number.isNaN(date.getTime())) return "";
+    const hours = String(date.getHours()).padStart(2, "0");
+    const minutes = String(date.getMinutes()).padStart(2, "0");
+    return `업데이트 ${hours}:${minutes}`;
+  };
+
+  const setWeatherState = (summary, temperature = "--°", icon = "cloud", updatedAt = "") => {
     summaryEl.textContent = summary;
     tempEl.textContent = temperature;
     iconEl.src = buildWeatherIcon(icon);
     iconEl.alt = summary;
+    updatedAtEl.textContent = formatUpdatedAt(updatedAt);
   };
 
   const setRefreshState = (disabled) => {
@@ -117,7 +131,7 @@ async function initWeatherWidget() {
     const cache = state.weatherCache;
     if (!cache) return false;
 
-    setWeatherState(cache.summary, cache.temperature, cache.icon);
+    setWeatherState(cache.summary, cache.temperature, cache.icon, cache.updatedAt);
     return true;
   };
 
@@ -170,7 +184,7 @@ async function initWeatherWidget() {
 
       state.weatherCache = nextCache;
       persist();
-      setWeatherState(nextCache.summary, nextCache.temperature, nextCache.icon);
+      setWeatherState(nextCache.summary, nextCache.temperature, nextCache.icon, nextCache.updatedAt);
     } catch (error) {
       console.error(error);
       if (!renderFromCache()) {
@@ -188,9 +202,120 @@ async function initWeatherWidget() {
   }
 }
 
+function getHomeGuideContent() {
+  const ua = navigator.userAgent || "";
+  const isEdge = /Edg\//.test(ua);
+  const isChrome = /Chrome\//.test(ua) && !isEdge;
+  const isFirefox = /Firefox\//.test(ua);
+
+  if (isEdge) {
+    return {
+      description: "Edge 설정에서 시작 페이지를 직접 지정하면 브라우저를 켤 때 이 화면이 바로 열려요.",
+      steps: [
+        "Edge 우측 상단 메뉴를 열고 설정으로 들어가세요.",
+        "시작, 홈 및 새 탭 페이지에서 브라우저 시작 시 항목을 찾으세요.",
+        "\"특정 페이지 열기\"를 선택하고 아래 주소를 추가하세요."
+      ]
+    };
+  }
+
+  if (isChrome) {
+    return {
+      description: "Chrome에서는 시작 그룹에 이 주소를 넣으면 브라우저 실행 직후 이 페이지가 열려요.",
+      steps: [
+        "Chrome 우측 상단 메뉴를 열고 설정으로 들어가세요.",
+        "시작 그룹에서 \"특정 페이지 또는 페이지 모음 열기\"를 선택하세요.",
+        "새 페이지 추가를 눌러 아래 주소를 붙여넣으세요."
+      ]
+    };
+  }
+
+  if (isFirefox) {
+    return {
+      description: "Firefox에서는 홈 설정에 이 주소를 넣으면 시작 페이지로 쓸 수 있어요.",
+      steps: [
+        "Firefox 메뉴를 열고 설정으로 들어가세요.",
+        "홈 탭에서 홈페이지 및 새 창 항목을 찾으세요.",
+        "\"사용자 지정 URL\"을 선택하고 아래 주소를 붙여넣으세요."
+      ]
+    };
+  }
+
+  return {
+    description: "브라우저마다 이름은 조금 다르지만, 보통 설정의 시작 페이지 또는 홈 항목에서 이 주소를 등록하면 됩니다.",
+    steps: [
+      "브라우저 설정을 여세요.",
+      "시작 페이지, 홈, 또는 브라우저 시작 시 항목을 찾으세요.",
+      "아래 주소를 복사해서 시작 페이지로 등록하세요."
+    ]
+  };
+}
+
+function initHomeGuide() {
+  const openBtn = document.getElementById("setHomeGuideBtn");
+  const modal = document.getElementById("homeGuideModal");
+  const closeBtn = document.getElementById("homeGuideCloseBtn");
+  const descriptionEl = document.getElementById("homeGuideDescription");
+  const stepsEl = document.getElementById("homeGuideSteps");
+  const urlInput = document.getElementById("homeGuideUrl");
+  const copyBtn = document.getElementById("copyHomeUrlBtn");
+  const toastEl = document.getElementById("homeGuideToast");
+
+  if (!openBtn || !modal || !closeBtn || !descriptionEl || !stepsEl || !urlInput || !copyBtn || !toastEl) return;
+
+  let toastTimer = null;
+  const pageUrl = window.location.href;
+  const content = getHomeGuideContent();
+
+  descriptionEl.textContent = content.description;
+  stepsEl.innerHTML = content.steps.map((step) => `<li>${step}</li>`).join("");
+  urlInput.value = pageUrl;
+
+  const showToast = (text) => {
+    if (toastTimer) clearTimeout(toastTimer);
+    toastEl.textContent = text;
+    toastEl.classList.add("show");
+    toastTimer = setTimeout(() => {
+      toastEl.classList.remove("show");
+    }, 1800);
+  };
+
+  const openModal = () => {
+    modal.classList.add("open");
+    modal.setAttribute("aria-hidden", "false");
+  };
+
+  const closeModal = () => {
+    modal.classList.remove("open");
+    modal.setAttribute("aria-hidden", "true");
+  };
+
+  openBtn.addEventListener("click", openModal);
+  closeBtn.addEventListener("click", closeModal);
+  modal.addEventListener("click", (event) => {
+    if (event.target === modal) closeModal();
+  });
+  document.addEventListener("keydown", (event) => {
+    if (event.key === "Escape") closeModal();
+  });
+  copyBtn.addEventListener("click", async () => {
+    try {
+      await navigator.clipboard.writeText(pageUrl);
+      urlInput.select();
+      showToast("시작페이지 주소를 복사했어요.");
+    } catch (error) {
+      console.error(error);
+      urlInput.focus();
+      urlInput.select();
+      showToast("복사가 막혀 있어요. 주소를 직접 복사해 주세요.");
+    }
+  });
+}
+
 async function bootstrap() {
   const host = document.getElementById("tabHost");
   initHeroZodiacMark();
+  initHomeGuide();
   const tabs = await loadTabs(host, tabConfigs, { state, persist });
   const validTabIds = new Set(tabConfigs.map((tab) => tab.id));
   const initialTab = validTabIds.has(state.activeTab) ? state.activeTab : "tracker";

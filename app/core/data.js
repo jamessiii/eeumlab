@@ -1,6 +1,6 @@
-export const PAID_WORK_SECONDS_PER_DAY = 7 * 60 * 60;
+export const PAID_WORK_SECONDS_PER_DAY = 8 * 60 * 60;
 export const DEFAULT_START = "09:00";
-export const DEFAULT_END = "17:00";
+export const DEFAULT_END = "18:00";
 
 export const fixedSolarHolidays = {
   "01-01": "신정",

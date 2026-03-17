@@ -7,9 +7,9 @@ export function initTrackerTab(root, { state, persist }) {
     salaryAppliedToast: $("#salaryAppliedToast", root),
     monthlyGoal: $("#monthlyGoal", root),
     leaveAllowance: $("#leaveAllowance", root),
-    startBtn: $("#startBtn", root),
-    stopBtn: $("#stopBtn", root),
-    editTodayBtn: $("#editTodayBtn", root),
+    workToggleBtn: $("#workToggleBtn", root),
+    todayStartTime: $("#todayStartTime", root),
+    todayEndTime: $("#todayEndTime", root),
     openIncomeTabBtn: $("#openIncomeTabBtn", root),
     todayMoney: $("#todayMoney", root),
     monthMoney: $("#monthMoney", root),
@@ -33,6 +33,11 @@ export function initTrackerTab(root, { state, persist }) {
     todayMonthBtn: $("#todayMonthBtn", root),
     nextMonthBtn: $("#nextMonthBtn", root),
     workLogBody: $("#workLogBody", root),
+    workConfirmModal: $("#workConfirmModal", root),
+    workConfirmTitle: $("#workConfirmTitle", root),
+    workConfirmText: $("#workConfirmText", root),
+    workConfirmCancelBtn: $("#workConfirmCancelBtn", root),
+    workConfirmOkBtn: $("#workConfirmOkBtn", root),
     modal: $("#dayModal", root),
     modalTitle: $("#modalTitle", root),
     closeModalBtn: $("#closeModalBtn", root),
@@ -56,6 +61,8 @@ export function initTrackerTab(root, { state, persist }) {
   let deferSalaryDrivenSummaryAnimation = false;
   let pendingSummaryTargets = null;
   let isWaitingForSalaryFeedback = false;
+  let forceSummaryTransition = false;
+  let pendingWorkAction = null;
 
   function cloneEntry(entry = {}) {
     return {
@@ -74,10 +81,58 @@ export function initTrackerTab(root, { state, persist }) {
     return state.entries[dateKey];
   }
 
+  function formatTimeValue(date) {
+    return `${pad(date.getHours())}:${pad(date.getMinutes())}`;
+  }
+
+  function getEntryStartDate(entry, date = getToday()) {
+    if (entry.liveStartTimestamp) {
+      return new Date(entry.liveStartTimestamp);
+    }
+
+    const startSeconds = timeToSeconds(entry.startTime);
+    if (startSeconds == null) return null;
+
+    return new Date(
+      date.getFullYear(),
+      date.getMonth(),
+      date.getDate(),
+      Math.floor(startSeconds / 3600),
+      Math.floor((startSeconds % 3600) / 60),
+      0,
+      0
+    );
+  }
+
+  function getAutoStopDate(entry, date = getToday()) {
+    const startDate = getEntryStartDate(entry, date);
+    if (!startDate) return null;
+
+    return new Date(startDate.getTime() + (PAID_WORK_SECONDS_PER_DAY + 60 * 60) * 1000);
+  }
+
+  function isLiveWorkSession(entry, date = getToday()) {
+    if (!isSameDay(date, getToday())) return false;
+    return Boolean((entry.running || entry.liveStartTimestamp || entry.startTime) && !entry.endTime);
+  }
+
   function syncInputsFromState() {
     els.monthlySalary.value = formatNumber(state.monthlySalary);
     els.monthlyGoal.value = state.monthlyGoal;
     els.leaveAllowance.value = state.leaveAllowance;
+  }
+
+  function syncTodayTimeInputs(force = false) {
+    const todayEntry = getEntry(getDateKey(getToday()));
+    const activeElement = document.activeElement;
+
+    if (force || activeElement !== els.todayStartTime) {
+      els.todayStartTime.value = todayEntry.startTime || "";
+    }
+
+    if (force || activeElement !== els.todayEndTime) {
+      els.todayEndTime.value = todayEntry.endTime || "";
+    }
   }
 
   function syncStateFromInputs() {
@@ -107,7 +162,7 @@ export function initTrackerTab(root, { state, persist }) {
     return 1 - 2 ** (-10 * progress);
   }
 
-  function animateSummaryMoneyFields(targets) {
+  function animateSummaryMoneyFields(targets, duration = 1900) {
     const currentValues = {
       todayMoney: Number(els.todayMoney.dataset.value || 0),
       monthMoney: Number(els.monthMoney.dataset.value || 0),
@@ -119,7 +174,6 @@ export function initTrackerTab(root, { state, persist }) {
     if (summaryAnimationFrame) cancelAnimationFrame(summaryAnimationFrame);
     isSummaryAnimating = true;
     const startTime = performance.now();
-    const duration = 1900;
 
     const step = (now) => {
       const progress = Math.min(1, (now - startTime) / duration);
@@ -246,7 +300,7 @@ export function initTrackerTab(root, { state, persist }) {
     return businessDays > 0 ? state.monthlySalary / businessDays : 0;
   };
 
-  const getHourlyWage = () => getDailyWage() / 7;
+  const getHourlyWage = () => getDailyWage() / (PAID_WORK_SECONDS_PER_DAY / 3600);
   const getPerSecondWage = () => getDailyWage() / PAID_WORK_SECONDS_PER_DAY;
 
   function getDayStatus(date, entry) {
@@ -255,7 +309,7 @@ export function initTrackerTab(root, { state, persist }) {
     if (entry.leaveType === "full") return isFuture(date) ? "휴가 예정" : "휴가";
     if (entry.leaveType === "half") return isFuture(date) ? "반차 예정" : "반차";
     if (entry.leaveType === "quarter") return isFuture(date) ? "반반차 예정" : "반반차";
-    if (entry.running && isSameDay(date, getToday())) return "출근 중";
+    if (isLiveWorkSession(entry, date)) return "근무 중";
     if (isPast(date)) return "정상근무";
     if (isSameDay(date, getToday())) return "오늘";
     return "예정";
@@ -277,12 +331,13 @@ export function initTrackerTab(root, { state, persist }) {
         ? computeWorkedSecondsFromTimes(entry.startTime || DEFAULT_START, entry.endTime || DEFAULT_END)
         : PAID_WORK_SECONDS_PER_DAY;
     } else if (isSameDay(date, getToday())) {
-      if (entry.running) {
-        const startSeconds = timeToSeconds(entry.startTime);
-        if (startSeconds != null) {
+      if (isLiveWorkSession(entry, date)) {
+        const startDate = getEntryStartDate(entry, date);
+        if (startDate) {
           const now = getNow();
-          const start = new Date(now.getFullYear(), now.getMonth(), now.getDate(), Math.floor(startSeconds / 3600), Math.floor((startSeconds % 3600) / 60), 0, 0);
-          const raw = Math.floor((now.getTime() - start.getTime()) / 1000);
+          const autoStopDate = getAutoStopDate(entry, date);
+          const effectiveNow = autoStopDate ? new Date(Math.min(now.getTime(), autoStopDate.getTime())) : now;
+          const raw = Math.floor((effectiveNow.getTime() - startDate.getTime()) / 1000);
           const lunchDeduction = raw >= 4 * 3600 ? 3600 : 0;
           paidSeconds = Math.max(0, Math.min(PAID_WORK_SECONDS_PER_DAY, raw - lunchDeduction));
         }
@@ -335,6 +390,7 @@ export function initTrackerTab(root, { state, persist }) {
   function renderSummary() {
     if (autoStopWorkIfComplete()) return;
     const today = getToday();
+    const todayEntry = getEntry(getDateKey(today));
     const todayResult = getDayResult(today);
     const monthSummary = getMonthSummary(today.getFullYear(), today.getMonth());
     const businessDays = getBusinessDaysInMonth(today.getFullYear(), today.getMonth());
@@ -349,6 +405,19 @@ export function initTrackerTab(root, { state, persist }) {
       dailyValue: getDailyWage()
     };
 
+    const currentAnimatedValues = {
+      todayMoney: Number(els.todayMoney.dataset.value || 0),
+      monthMoney: Number(els.monthMoney.dataset.value || 0),
+      perSecondValue: Number(els.perSecondValue.dataset.value || 0),
+      hourlyValue: Number(els.hourlyValue.dataset.value || 0),
+      dailyValue: Number(els.dailyValue.dataset.value || 0)
+    };
+    const hasLiveTickChange = isLiveWorkSession(todayEntry)
+      && (
+        Math.abs(currentAnimatedValues.todayMoney - moneyTargets.todayMoney) >= 1
+        || Math.abs(currentAnimatedValues.monthMoney - moneyTargets.monthMoney) >= 1
+      );
+
     if (salaryChanged) {
       if (deferSalaryDrivenSummaryAnimation || isWaitingForSalaryFeedback) {
         pendingSummaryTargets = moneyTargets;
@@ -356,6 +425,11 @@ export function initTrackerTab(root, { state, persist }) {
         lastAnimatedSalary = state.monthlySalary;
         animateSummaryMoneyFields(moneyTargets);
       }
+    } else if (forceSummaryTransition) {
+      forceSummaryTransition = false;
+      animateSummaryMoneyFields(moneyTargets);
+    } else if (hasLiveTickChange) {
+      animateSummaryMoneyFields(moneyTargets, 650);
     } else if (!isSummaryAnimating) {
       els.todayMoney.dataset.value = String(moneyTargets.todayMoney);
       els.monthMoney.dataset.value = String(moneyTargets.monthMoney);
@@ -378,7 +452,9 @@ export function initTrackerTab(root, { state, persist }) {
     els.leaveRemainingValue.textContent = formatLeaveDays(leaveSummary.remaining);
     els.leaveMonthUsedValue.textContent = formatLeaveDays(leaveSummary.monthUsed);
     els.leaveMonthUsedSub.textContent = `${state.calendarYear}년 ${state.calendarMonth + 1}월 기준`;
+    syncTodayTimeInputs();
     updateStatusPill();
+    updateWorkToggleButton();
   }
 
   function updateStatusPill() {
@@ -388,7 +464,7 @@ export function initTrackerTab(root, { state, persist }) {
     if (entry.leaveType !== "none") {
       els.statusPill.classList.add("leave");
       els.statusText.textContent = result.status;
-    } else if (entry.running) {
+    } else if (isLiveWorkSession(entry)) {
       els.statusPill.classList.add("working");
       els.statusText.textContent = "출근 상태";
     } else if (result.paidSeconds >= PAID_WORK_SECONDS_PER_DAY) {
@@ -398,6 +474,35 @@ export function initTrackerTab(root, { state, persist }) {
       els.statusPill.classList.add("off");
       els.statusText.textContent = "퇴근 상태";
     }
+  }
+
+  function updateWorkToggleButton() {
+    const entry = getEntry(getDateKey(getToday()));
+    const result = getDayResult(getToday());
+    const button = els.workToggleBtn;
+    if (!button) return;
+
+    button.disabled = false;
+    button.classList.remove("btn-start", "btn-stop", "btn-muted");
+
+    if (isLiveWorkSession(entry)) {
+      button.textContent = "지금 퇴근";
+      button.classList.add("btn-stop");
+      button.dataset.action = "stop";
+      return;
+    }
+
+    if (result.paidSeconds >= PAID_WORK_SECONDS_PER_DAY) {
+      button.textContent = "오늘 근무 완료";
+      button.classList.add("btn-muted");
+      button.dataset.action = "done";
+      button.disabled = true;
+      return;
+    }
+
+    button.textContent = "지금 출근";
+    button.classList.add("btn-start");
+    button.dataset.action = "start";
   }
 
   function renderCalendar() {
@@ -431,9 +536,9 @@ export function initTrackerTab(root, { state, persist }) {
       else if (result.entry.leaveType === "full") dayEl.classList.add("leave-full");
       else if (result.paidSeconds > 0) dayEl.classList.add("worked");
 
-      const tag = result.weekend ? "주말" : result.holiday ? getHolidayLabel(date, result.entry) || "공휴일" : result.entry.leaveType === "full" ? (isFuture(date) ? "휴가 예정" : "휴가") : result.entry.leaveType === "half" ? (isFuture(date) ? "반차 예정" : "반차") : result.entry.leaveType === "quarter" ? (isFuture(date) ? "반반차 예정" : "반반차") : result.entry.running ? "출근 중" : result.paidSeconds > 0 ? "근무 반영" : "";
-      const tagClass = result.weekend ? "tag-weekend" : result.holiday ? "tag-holiday" : result.entry.leaveType === "full" ? "tag-leave-full" : result.entry.leaveType === "half" ? "tag-leave-half" : result.entry.leaveType === "quarter" ? "tag-leave-quarter" : result.entry.running ? "tag-running" : result.paidSeconds > 0 ? "tag-worked" : "";
-      const timeText = result.entry.startTime || result.entry.endTime ? `${result.entry.startTime || "--:--"} ~ ${result.entry.endTime || (result.entry.running ? "진행중" : "--:--")}` : "";
+      const tag = result.weekend ? "주말" : result.holiday ? getHolidayLabel(date, result.entry) || "공휴일" : result.entry.leaveType === "full" ? (isFuture(date) ? "휴가 예정" : "휴가") : result.entry.leaveType === "half" ? (isFuture(date) ? "반차 예정" : "반차") : result.entry.leaveType === "quarter" ? (isFuture(date) ? "반반차 예정" : "반반차") : isLiveWorkSession(result.entry, date) ? "근무 중" : result.paidSeconds > 0 ? "근무 반영" : "";
+      const tagClass = result.weekend ? "tag-weekend" : result.holiday ? "tag-holiday" : result.entry.leaveType === "full" ? "tag-leave-full" : result.entry.leaveType === "half" ? "tag-leave-half" : result.entry.leaveType === "quarter" ? "tag-leave-quarter" : isLiveWorkSession(result.entry, date) ? "tag-running" : result.paidSeconds > 0 ? "tag-worked" : "";
+      const timeText = result.entry.startTime || result.entry.endTime ? `${result.entry.startTime || "--:--"} ~ ${result.entry.endTime || (isLiveWorkSession(result.entry, date) ? "진행중" : "--:--")}` : "";
       dayEl.innerHTML = `
         <div class="day-date">${date.getDate()}</div>
         ${tag ? `<div class="day-tag ${tagClass}">${tag}</div>` : ""}
@@ -454,7 +559,7 @@ export function initTrackerTab(root, { state, persist }) {
       const date = new Date(year, month, day);
       if (isFuture(date)) continue;
       const result = getDayResult(date);
-      const hasWork = Boolean(result.entry.running || result.entry.startTime || result.entry.endTime);
+      const hasWork = Boolean(isLiveWorkSession(result.entry, date) || result.entry.startTime || result.entry.endTime);
       const onClosedDay = result.weekend || result.holiday;
       const breakText = hasWork && getBreakSecondsForEntry(result.entry) > 0 ? formatTimeFromSeconds(getBreakSecondsForEntry(result.entry)) : "-";
       const timeText = onClosedDay && !hasWork ? "-" : formatTimeFromSeconds(result.paidSeconds);
@@ -465,7 +570,7 @@ export function initTrackerTab(root, { state, persist }) {
         <td class="${dateClass}">${date.getFullYear()}-${pad(date.getMonth() + 1)}-${pad(date.getDate())} (${getWeekdayLabel(date)})</td>
         <td>${result.status}</td>
         <td>${result.entry.startTime || "-"}</td>
-        <td>${result.entry.endTime || (result.entry.running ? "진행중" : "-")}</td>
+        <td>${result.entry.endTime || (isLiveWorkSession(result.entry, date) ? "진행중" : "-")}</td>
         <td>${breakText}</td>
         <td>${timeText}</td>
         <td>${moneyText}</td>
@@ -526,25 +631,95 @@ export function initTrackerTab(root, { state, persist }) {
     openDayModal(selectedDateKey);
   }
 
+  function closeWorkConfirmModal() {
+    pendingWorkAction = null;
+    els.workConfirmModal.classList.remove("open");
+    els.workConfirmModal.setAttribute("aria-hidden", "true");
+  }
+
+  function openWorkConfirmModal(action) {
+    pendingWorkAction = action;
+    const isStart = action === "start";
+    els.workConfirmTitle.textContent = isStart ? "출근 처리할까요?" : "퇴근 처리할까요?";
+    els.workConfirmText.textContent = isStart
+      ? "지금 시각 기준으로 출근 상태로 전환합니다."
+      : "지금 시각 기준으로 퇴근 상태로 전환합니다.";
+    els.workConfirmModal.classList.add("open");
+    els.workConfirmModal.setAttribute("aria-hidden", "false");
+  }
+
+  function confirmWorkAction() {
+    const action = pendingWorkAction;
+    closeWorkConfirmModal();
+    if (action === "start") {
+      startWorkNow();
+      return;
+    }
+    if (action === "stop") {
+      stopWorkNow();
+    }
+  }
+
+  function updateTodayTimesInline() {
+    const today = getToday();
+    const entry = getEntry(getDateKey(today));
+
+    entry.startTime = els.todayStartTime.value || "";
+    entry.endTime = els.todayEndTime.value || "";
+
+    if (isLiveWorkSession(entry, today)) {
+      if (!entry.startTime) {
+        const now = getNow();
+        entry.startTime = formatTimeValue(now);
+        entry.liveStartTimestamp = now.getTime();
+      } else {
+        const startSeconds = timeToSeconds(entry.startTime);
+        const startDate = startSeconds == null
+          ? null
+          : new Date(
+              today.getFullYear(),
+              today.getMonth(),
+              today.getDate(),
+              Math.floor(startSeconds / 3600),
+              Math.floor((startSeconds % 3600) / 60),
+              0,
+              0
+            );
+        entry.liveStartTimestamp = startDate ? startDate.getTime() : getNow().getTime();
+      }
+
+      if (entry.endTime) {
+        entry.running = false;
+        entry.liveStartTimestamp = null;
+      }
+    } else {
+      entry.liveStartTimestamp = null;
+    }
+
+    persist();
+    syncTodayTimeInputs(true);
+    forceSummaryTransition = true;
+    renderAll();
+  }
+
   function startWorkNow() {
     const entry = getEntry(getDateKey(getToday()));
     const now = getNow();
     entry.leaveType = "none";
     entry.customHoliday = false;
     entry.running = true;
-    entry.liveStartTimestamp = Date.now();
-    if (!entry.startTime) entry.startTime = `${pad(now.getHours())}:${pad(now.getMinutes())}`;
+    entry.liveStartTimestamp = now.getTime();
+    if (!entry.startTime) entry.startTime = formatTimeValue(now);
     entry.endTime = "";
     persist();
     renderAll();
   }
 
-  function stopWorkNow() {
+  function stopWorkNow(stopDate = getNow()) {
     const entry = getEntry(getDateKey(getToday()));
-    const now = getNow();
     entry.running = false;
     entry.liveStartTimestamp = null;
-    entry.endTime = `${pad(now.getHours())}:${pad(now.getMinutes())}`;
+    entry.endTime = formatTimeValue(stopDate);
     if (!entry.startTime) entry.startTime = DEFAULT_START;
     persist();
     renderAll();
@@ -552,10 +727,22 @@ export function initTrackerTab(root, { state, persist }) {
 
   function autoStopWorkIfComplete() {
     const entry = getEntry(getDateKey(getToday()));
-    if (!entry.running) return false;
-    if (getDayResult(getToday()).paidSeconds < PAID_WORK_SECONDS_PER_DAY) return false;
-    stopWorkNow();
+    if (!isLiveWorkSession(entry)) return false;
+    const autoStopDate = getAutoStopDate(entry, getToday());
+    if (!autoStopDate || getNow().getTime() < autoStopDate.getTime()) return false;
+    stopWorkNow(autoStopDate);
     return true;
+  }
+
+  function handleWorkToggle() {
+    if (els.workToggleBtn?.dataset.action === "stop") {
+      openWorkConfirmModal("stop");
+      return;
+    }
+
+    if (els.workToggleBtn?.dataset.action === "start") {
+      openWorkConfirmModal("start");
+    }
   }
 
   function renderAll() {
@@ -573,9 +760,16 @@ export function initTrackerTab(root, { state, persist }) {
     el.addEventListener("input", handler);
     el.addEventListener("change", handler);
   });
-  els.startBtn.addEventListener("click", startWorkNow);
-  els.stopBtn.addEventListener("click", stopWorkNow);
-  els.editTodayBtn.addEventListener("click", () => openDayModal(getDateKey(getToday())));
+  [els.todayStartTime, els.todayEndTime].forEach((el) => {
+    el.addEventListener("change", updateTodayTimesInline);
+    el.addEventListener("blur", updateTodayTimesInline);
+  });
+  els.workToggleBtn.addEventListener("click", handleWorkToggle);
+  els.workConfirmCancelBtn.addEventListener("click", closeWorkConfirmModal);
+  els.workConfirmOkBtn.addEventListener("click", confirmWorkAction);
+  els.workConfirmModal.addEventListener("click", (event) => {
+    if (event.target === els.workConfirmModal) closeWorkConfirmModal();
+  });
   els.openIncomeTabBtn.addEventListener("click", () => {
     document.querySelector('.tab-btn[data-tab="income"]')?.click();
   });
@@ -612,10 +806,15 @@ export function initTrackerTab(root, { state, persist }) {
   els.clearDayBtn.addEventListener("click", clearDaySettings);
   els.deleteNoteBtn.addEventListener("click", clearDayNote);
   document.addEventListener("keydown", (event) => {
+    if (event.key === "Escape" && els.workConfirmModal.classList.contains("open")) {
+      closeWorkConfirmModal();
+      return;
+    }
     if (event.key === "Escape") closeDayModal();
   });
 
   syncInputsFromState();
+  syncTodayTimeInputs(true);
   renderAll();
   const timer = setInterval(renderSummary, 1000);
   return {
