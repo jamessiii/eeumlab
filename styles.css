@@ -149,6 +149,32 @@ button, input, select, textarea {
   animation: text-attention-pulse 1s ease-in-out infinite;
 }
 
+.global-tracker-alert {
+  display: inline-flex;
+  align-items: center;
+  padding: 6px 12px;
+  border-radius: 999px;
+  font-size: 12px;
+  font-weight: 900;
+  letter-spacing: -0.01em;
+  vertical-align: middle;
+  cursor: pointer;
+}
+
+.global-tracker-alert[data-tone="leave-soon"] {
+  background: rgba(250, 204, 21, 0.14);
+  color: #fef08a;
+}
+
+.global-tracker-alert[data-tone="clocked-out"] {
+  background: rgba(248, 113, 113, 0.14);
+  color: #fca5a5;
+}
+
+.global-tracker-alert.active.pulse {
+  animation: text-attention-pulse 1s ease-in-out infinite;
+}
+
 .hero p,
 .hint {
   margin: 0;
@@ -726,10 +752,35 @@ button, input, select, textarea {
   overflow-wrap: anywhere;
 }
 
+.summary-card.auto-stop-highlight {
+  border-color: rgba(248, 113, 113, 0.48);
+  box-shadow: 0 0 0 1px rgba(248, 113, 113, 0.16), 0 0 28px rgba(248, 113, 113, 0.18);
+  animation: tracker-auto-stop-glow 1.5s ease-in-out infinite;
+}
+
+.summary-card.auto-stop-highlight .summary-label {
+  font-weight: 900;
+  color: #fecaca;
+}
+
+.summary-card.auto-stop-highlight .summary-value {
+  color: #fef08a;
+  text-shadow: 0 0 18px rgba(254, 240, 138, 0.22);
+}
+
 .summary-sub,
 .stat-value {
   font-size: 13px;
   color: #cbd5e1;
+}
+
+@keyframes tracker-auto-stop-glow {
+  0%, 100% {
+    box-shadow: 0 0 0 1px rgba(248, 113, 113, 0.14), 0 0 18px rgba(248, 113, 113, 0.1);
+  }
+  50% {
+    box-shadow: 0 0 0 1px rgba(248, 113, 113, 0.26), 0 0 34px rgba(248, 113, 113, 0.22);
+  }
 }
 
 .stat-value {
@@ -1425,7 +1476,7 @@ td.date-sunday {
 
 .lunch-search-controls {
   display: grid;
-  grid-template-columns: auto minmax(0, 1fr);
+  grid-template-columns: auto minmax(0, 1fr) auto;
   gap: 12px;
   align-items: end;
   flex: 0 0 min(100%, 540px);
@@ -1434,6 +1485,10 @@ td.date-sunday {
 
 .lunch-search-field input {
   min-width: 0;
+}
+
+.lunch-add-place-btn {
+  white-space: nowrap;
 }
 
 .lunch-location-status[data-tone="loading"] {
@@ -1539,6 +1594,110 @@ td.date-sunday {
   position: relative;
 }
 
+.bookmark-group-create {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+}
+
+.bookmark-url-toggle-btn {
+  white-space: nowrap;
+}
+
+.bookmark-group-section {
+  padding: 0 0 10px;
+  transition: transform 0.18s ease, opacity 0.18s ease, border-color 0.18s ease;
+}
+
+.bookmark-group-section + .bookmark-group-section {
+  margin-top: 18px;
+}
+
+.bookmark-group-section.dragging {
+  opacity: 0.48;
+  transform: scale(0.985);
+}
+
+.bookmark-group-section.drag-over .bookmark-group-list {
+  border-color: rgba(125, 211, 252, 0.42);
+  box-shadow: inset 0 0 0 1px rgba(125, 211, 252, 0.2);
+}
+
+.bookmark-group-section-header {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+  margin-bottom: 12px;
+}
+
+.bookmark-group-section-header h3 {
+  margin: 0;
+  font-size: 18px;
+}
+
+.bookmark-group-title-row {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+}
+
+.bookmark-group-title-input {
+  min-width: 140px;
+  padding: 7px 10px;
+  border-radius: 10px;
+  border: 1px solid rgba(148, 163, 184, 0.18);
+  background: rgba(15, 23, 42, 0.76);
+  color: #f8fafc;
+  font: inherit;
+  font-weight: 700;
+}
+
+.bookmark-group-edit-btn {
+  width: 28px;
+  height: 28px;
+  border: 0;
+  background: transparent;
+  color: #94a3b8;
+  cursor: pointer;
+  transition: color 0.18s ease, transform 0.18s ease;
+}
+
+.bookmark-group-edit-btn:hover,
+.bookmark-group-edit-btn:focus-visible {
+  color: #f8fafc;
+  transform: translateY(-1px);
+  outline: none;
+}
+
+.bookmark-group-list {
+  display: grid;
+  grid-template-columns: repeat(6, minmax(0, 1fr));
+  gap: 12px;
+  min-height: 88px;
+  padding: 8px;
+  border-radius: 22px;
+  border: 1px solid rgba(148, 163, 184, 0.08);
+  background: rgba(15, 23, 42, 0.2);
+  transition: border-color 0.18s ease, background-color 0.18s ease, box-shadow 0.18s ease;
+}
+
+.bookmark-group-list.drag-over {
+  border-color: rgba(125, 211, 252, 0.36);
+  background: rgba(59, 130, 246, 0.08);
+  box-shadow: inset 0 0 0 1px rgba(125, 211, 252, 0.16);
+}
+
+.bookmark-group-empty {
+  grid-column: 1 / -1;
+  display: flex;
+  align-items: center;
+  min-height: 72px;
+  padding: 0 12px;
+  color: #94a3b8;
+  font-size: 14px;
+}
+
 .bookmarks-header-actions {
   display: flex;
   align-items: center;
@@ -1595,9 +1754,7 @@ td.date-sunday {
 }
 
 .bookmark-list {
-  display: grid;
-  grid-template-columns: repeat(5, minmax(0, 1fr));
-  gap: 12px;
+  display: block;
 }
 
 .bookmark-drop-hint {
@@ -1649,6 +1806,10 @@ td.date-sunday {
 }
 
 .bookmarks-card.bookmark-list-mode .bookmark-list {
+  display: block;
+}
+
+.bookmarks-card.bookmark-list-mode .bookmark-group-list {
   grid-template-columns: 1fr;
 }
 
@@ -1691,6 +1852,12 @@ td.date-sunday {
   white-space: nowrap;
   overflow: hidden;
   text-overflow: ellipsis;
+}
+
+.bookmarks-card.bookmark-list-mode .bookmark-group-badge {
+  grid-column: 2;
+  margin: 0;
+  justify-self: start;
 }
 
 .bookmarks-card.bookmark-list-mode .bookmark-tags {
@@ -1804,7 +1971,7 @@ td.date-sunday {
   cursor: pointer;
   transition: transform 0.28s ease, border-color 0.28s ease, box-shadow 0.28s ease;
   position: relative;
-  padding-bottom: 42px;
+  padding-bottom: 14px;
 }
 
 .bookmark-item:hover,
@@ -1910,8 +2077,22 @@ td.date-sunday {
 }
 
 .bookmark-item h3 {
-  margin: 12px 0 6px;
-  font-size: 16px;
+  margin: 10px 0 5px;
+  font-size: 15px;
+}
+
+.bookmark-group-badge {
+  display: inline-flex;
+  align-items: center;
+  min-height: 22px;
+  padding: 0 8px;
+  margin-bottom: 6px;
+  border-radius: 999px;
+  background: rgba(148, 163, 184, 0.1);
+  border: 1px solid rgba(148, 163, 184, 0.14);
+  color: #cbd5e1;
+  font-size: 11px;
+  font-weight: 700;
 }
 
 .bookmark-tags {
@@ -1921,7 +2102,7 @@ td.date-sunday {
   margin: 0;
   position: absolute;
   right: 14px;
-  bottom: 12px;
+  bottom: 14px;
   justify-content: flex-end;
   max-width: calc(100% - 28px);
   overflow: hidden;
@@ -1995,6 +2176,28 @@ td.date-sunday {
   min-height: 24px;
 }
 
+.bookmark-label-select-row {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) auto;
+  gap: 10px;
+  margin-top: 10px;
+}
+
+.bookmark-label-select {
+  width: 100%;
+  min-width: 0;
+  padding: 11px 14px;
+  border-radius: 14px;
+  border: 1px solid rgba(148, 163, 184, 0.16);
+  background: rgba(15, 23, 42, 0.86);
+  color: #f8fafc;
+}
+
+.bookmark-label-select:disabled {
+  opacity: 0.6;
+  cursor: not-allowed;
+}
+
 .bookmark-label-picker .bookmark-tag {
   position: static;
   max-width: 100%;
@@ -2023,13 +2226,16 @@ td.date-sunday {
 }
 
 .bookmark-label-color-input {
-  width: 26px;
-  min-width: 26px;
-  height: 26px;
+  width: 28px;
+  min-width: 28px;
+  height: 28px;
   padding: 0;
-  border: none;
-  background: transparent;
+  border: 1px solid rgba(148, 163, 184, 0.24);
+  border-radius: 999px;
+  background: rgba(15, 23, 42, 0.5);
   cursor: pointer;
+  appearance: none;
+  -webkit-appearance: none;
 }
 
 .bookmark-label-color-input::-webkit-color-swatch-wrapper {
@@ -2095,18 +2301,18 @@ td.date-sunday {
 }
 
 .bookmark-note {
-  margin: 10px 0 0;
+  margin: 6px 92px 0 0;
   color: #cbd5e1;
-  line-height: 1.6;
-  font-size: 13px;
-  min-height: 40px;
+  line-height: 1.45;
+  font-size: 12px;
+  min-height: 0;
 }
 
 .bookmark-item-add {
   display: grid;
   place-items: center;
   gap: 8px;
-  min-height: 164px;
+  min-height: 138px;
   border-style: dashed;
   background: rgba(15, 23, 42, 0.56);
 }
@@ -3374,6 +3580,7 @@ td.date-sunday {
   display: flex;
   align-items: center;
   gap: 8px;
+  flex-wrap: wrap;
 }
 
 .lunch-item h3 {
@@ -3452,12 +3659,20 @@ td.date-sunday {
 
 .lunch-card-footer {
   display: flex;
+  align-items: center;
   justify-content: flex-end;
+  gap: 8px;
   margin-top: 16px;
 }
 
 .lunch-map-btn {
   padding: 10px 14px;
+}
+
+.lunch-custom-badge {
+  background: rgba(45, 212, 191, 0.14);
+  color: #99f6e4;
+  border-color: rgba(45, 212, 191, 0.28);
 }
 
 .lunch-empty {
@@ -4641,7 +4856,7 @@ td.date-sunday {
     min-height: 0;
   }
 
-  .bookmark-list {
+  .bookmark-group-list {
     grid-template-columns: repeat(3, minmax(0, 1fr));
   }
 
@@ -4729,7 +4944,7 @@ td.date-sunday {
     grid-template-columns: 1fr;
   }
 
-  .bookmark-list {
+  .bookmark-group-list {
     grid-template-columns: repeat(2, minmax(0, 1fr));
   }
 

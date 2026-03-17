@@ -96,6 +96,7 @@ const defaultState = {
   lunchLastFetchAt: "",
   lunchLastLocation: null,
   lunchCachedPlaces: [],
+  lunchCustomPlaces: [],
   todoItems: [],
   todoViewMode: "list",
   todoCalendarMode: "month",
@@ -103,8 +104,15 @@ const defaultState = {
   todoShowFavoritesOnly: false,
   todoShowCompleted: true,
   bookmarks: [],
+  bookmarkGroups: [],
   bookmarkViewMode: "card",
+  bookmarkShowUrl: false,
+  bookmarkActiveGroup: "전체",
   bookmarkLabels: [],
+  trackerAfterWorkMessageDate: "",
+  trackerAutoStoppedDate: "",
+  trackerAfterWorkAlertAt: 0,
+  trackerAutoStoppedAt: 0,
   fortuneSelectedZodiac: "",
   ladderNames: "민수\n지연\n현우\n서연",
   ladderPlayerCount: 4,
@@ -338,6 +346,7 @@ function setActiveTab(tabs, activeTabId) {
   });
 
   requestAnimationFrame(() => updateTabIndicator(activeTabId));
+  updateSeoMeta(activeTabId);
 }
 function bindTabButtons(onSelect) {
   ensureTabIndicator();
@@ -391,6 +400,32 @@ function setGlobalTodoAlert(text = "", tone = "") {
   badge.classList.toggle("active", Boolean(text));
 }
 
+function ensureGlobalTrackerAlertBadge() {
+  let badge = document.getElementById("globalTrackerAlert");
+  const title = document.querySelector(".hero-copy h1");
+  if (!title) return null;
+  if (!badge) {
+    badge = document.createElement("span");
+    badge.id = "globalTrackerAlert";
+    badge.className = "global-tracker-alert";
+    badge.hidden = true;
+    title.appendChild(badge);
+  } else if (!title.contains(badge)) {
+    title.appendChild(badge);
+  }
+  return badge;
+}
+
+function setGlobalTrackerAlert(text = "", tone = "", pulse = true) {
+  const badge = ensureGlobalTrackerAlertBadge();
+  if (!badge) return;
+  badge.hidden = !text;
+  badge.textContent = text;
+  badge.dataset.tone = tone || "";
+  badge.classList.toggle("active", Boolean(text));
+  badge.classList.toggle("pulse", Boolean(text && pulse));
+}
+
 function placeGlobalLunchAlertNearTitle() {
   const badge = document.getElementById("globalLunchAlert");
   const title = document.querySelector(".hero-copy h1");
@@ -407,7 +442,87 @@ function moveHomeGuideButtonToTabBar() {
   tabBar.appendChild(button);
 }
 
+const SEO_TAB_META = {
+  tracker: {
+    title: "슬기로운 월루생활 | 직딩심체요절",
+    description: "출근, 퇴근, 근무시간, 손해 금액, 휴가와 근무 기록을 한눈에 관리하는 슬기로운 월루생활 탭입니다."
+  },
+  income: {
+    title: "실수령액표 | 직딩심체요절",
+    description: "연봉과 월급 기준으로 실수령액을 빠르게 계산하고 비교할 수 있는 실수령액표 탭입니다."
+  },
+  bookmarks: {
+    title: "북마크 관리 | 직딩심체요절",
+    description: "자주 쓰는 사이트를 그룹과 라벨로 정리하고 새 탭으로 빠르게 여는 북마크 관리 탭입니다."
+  },
+  todo: {
+    title: "오늘 할 일 캘린더 | 직딩심체요절",
+    description: "할 일과 일정을 목록과 캘린더로 관리하고 반복 작업, 미리 알림, 중요 표시까지 지원하는 오늘 할 일 탭입니다."
+  },
+  lunch: {
+    title: "점메추 | 직딩심체요절",
+    description: "근처 식당 탐색, 즐겨찾기, 카테고리 필터, 오늘 메뉴 랜덤 뽑기를 지원하는 점메추 탭입니다."
+  },
+  fortune: {
+    title: "오늘의 운세 | 직딩심체요절",
+    description: "띠별 오늘의 운세를 확인하고 한 줄 운세, 업무운, 금전운, 관계운을 볼 수 있는 탭입니다."
+  },
+  ladder: {
+    title: "사다리게임 | 직딩심체요절",
+    description: "참가자와 결과를 자유롭게 설정하고 세로형과 가로형으로 즐길 수 있는 사다리게임 탭입니다."
+  }
+};
+
+function updateSeoMeta(activeTabId) {
+  const meta = SEO_TAB_META[activeTabId] || {
+    title: "직딩심체요절 | 월급 계산, 점메추, 오늘 할 일, 북마크, 운세, 사다리게임",
+    description: "직장인을 위한 올인원 업무 보조 대시보드. 월급 계산과 점메추, 오늘 할 일, 북마크, 운세, 사다리게임을 한 곳에서 관리하세요."
+  };
+  document.title = meta.title;
+  document.querySelector('meta[name="description"]')?.setAttribute("content", meta.description);
+  document.querySelector('meta[property="og:title"]')?.setAttribute("content", meta.title);
+  document.querySelector('meta[property="og:description"]')?.setAttribute("content", meta.description);
+  document.querySelector('meta[name="twitter:title"]')?.setAttribute("content", meta.title);
+  document.querySelector('meta[name="twitter:description"]')?.setAttribute("content", meta.description);
+
+  const canonical = document.getElementById("canonicalLink");
+  const url = new URL(window.location.href);
+  url.hash = activeTabId ? `#${activeTabId}` : "";
+  canonical?.setAttribute("href", url.toString());
+  document.querySelector('meta[property="og:url"]')?.setAttribute("content", url.toString());
+
+  const structuredData = document.getElementById("structuredData");
+  if (structuredData) {
+    structuredData.textContent = JSON.stringify({
+      "@context": "https://schema.org",
+      "@type": "WebApplication",
+      name: "직딩심체요절",
+      applicationCategory: "BusinessApplication",
+      operatingSystem: "Web",
+      inLanguage: "ko-KR",
+      url: url.toString(),
+      description: meta.description,
+      offers: {
+        "@type": "Offer",
+        price: "0",
+        priceCurrency: "KRW"
+      },
+      featureList: [
+        "슬기로운 월루생활",
+        "실수령액 계산표",
+        "점메추",
+        "오늘 할 일 캘린더",
+        "북마크 관리",
+        "오늘의 운세",
+        "사다리게임"
+      ]
+    });
+  }
+}
+
 function bindGlobalAlertBadges(tabs, state, persist) {
+  ensureGlobalTodoAlertBadge();
+  ensureGlobalTrackerAlertBadge();
   const goToTab = (tabId) => {
     state.activeTab = tabId;
     persist();
@@ -424,6 +539,12 @@ function bindGlobalAlertBadges(tabs, state, persist) {
     goToTab("todo");
     const todoTab = tabs.find((tab) => tab.id === "todo");
     todoTab?.controller?.focusAlert?.();
+  });
+
+  document.getElementById("globalTrackerAlert")?.addEventListener("click", () => {
+    goToTab("tracker");
+    const trackerTab = tabs.find((tab) => tab.id === "tracker");
+    trackerTab?.controller?.focusAlert?.();
   });
 }
 
@@ -734,6 +855,36 @@ function initTrackerTab(root, { state, persist }) {
   function isLiveWorkSession(entry, date = getToday()) {
     if (!isSameDay(date, getToday())) return false;
     return Boolean((entry.running || entry.liveStartTimestamp || entry.startTime) && !entry.endTime);
+  }
+
+  function syncTrackerHeaderAlert() {
+    const today = getToday();
+    const todayKey = getDateKey(today);
+    if (state.trackerAfterWorkMessageDate && state.trackerAfterWorkMessageDate !== todayKey) {
+      state.trackerAfterWorkMessageDate = "";
+      state.trackerAutoStoppedDate = "";
+      state.trackerAfterWorkAlertAt = 0;
+      state.trackerAutoStoppedAt = 0;
+      persist();
+    }
+
+    const entry = getEntry(todayKey);
+    const autoStopDate = getAutoStopDate(entry, today);
+    const now = getNow();
+    const leaveSoonStart = autoStopDate ? new Date(autoStopDate.getTime() - 60 * 60 * 1000) : null;
+    const shouldPulseAfterWork = state.trackerAfterWorkAlertAt > 0 && (now.getTime() - state.trackerAfterWorkAlertAt) < 12000;
+
+    if (state.trackerAfterWorkMessageDate === todayKey) {
+      setGlobalTrackerAlert("고민 말고 나가세요. 고민은 퇴근만 늦출 뿐...", "clocked-out", shouldPulseAfterWork);
+      return;
+    }
+
+    if (isLiveWorkSession(entry, today) && leaveSoonStart && now.getTime() >= leaveSoonStart.getTime() && now.getTime() < autoStopDate.getTime()) {
+      setGlobalTrackerAlert("슬슬 퇴근 준비하세요~!! 칼퇴는 직장인의 미덕😘", "leave-soon", true);
+      return;
+    }
+
+    setGlobalTrackerAlert("", "", false);
   }
 
   function syncInputsFromState() {
@@ -1070,9 +1221,13 @@ function initTrackerTab(root, { state, persist }) {
     els.leaveRemainingValue.textContent = formatLeaveDays(leaveSummary.remaining);
     els.leaveMonthUsedValue.textContent = formatLeaveDays(leaveSummary.monthUsed);
     els.leaveMonthUsedSub.textContent = `${state.calendarYear}년 ${state.calendarMonth + 1}월 기준`;
+    const todayMoneyCard = els.todayMoney?.closest(".summary-card");
+    const autoStoppedToday = state.trackerAutoStoppedDate === getDateKey(today) && state.trackerAutoStoppedAt > 0 && (getNow().getTime() - state.trackerAutoStoppedAt) < 12000;
+    todayMoneyCard?.classList.toggle("auto-stop-highlight", autoStoppedToday);
     syncTodayTimeInputs();
     updateStatusPill();
     updateWorkToggleButton();
+    syncTrackerHeaderAlert();
   }
 
   function updateStatusPill() {
@@ -1087,7 +1242,7 @@ function initTrackerTab(root, { state, persist }) {
       els.statusText.textContent = "출근 상태";
     } else if (result.paidSeconds >= PAID_WORK_SECONDS_PER_DAY) {
       els.statusPill.classList.add("done");
-      els.statusText.textContent = "오늘 근무 완료";
+      els.statusText.textContent = "근무 끝";
     } else {
       els.statusPill.classList.add("off");
       els.statusText.textContent = "퇴근 상태";
@@ -1110,7 +1265,7 @@ function initTrackerTab(root, { state, persist }) {
     }
 
     if (result.paidSeconds >= PAID_WORK_SECONDS_PER_DAY) {
-      button.textContent = "오늘 근무 완료";
+      button.textContent = "근무 끝";
       button.classList.add("btn-muted");
       button.dataset.action = "done";
       button.disabled = true;
@@ -1270,7 +1425,7 @@ function initTrackerTab(root, { state, persist }) {
       return;
     }
     if (action === "stop") {
-      stopWorkNow();
+      stopWorkNow(getNow(), { manual: true });
     }
   }
 
@@ -1315,6 +1470,10 @@ function initTrackerTab(root, { state, persist }) {
   function startWorkNow() {
     const entry = getEntry(getDateKey(getToday()));
     const now = getNow();
+    state.trackerAfterWorkMessageDate = "";
+    state.trackerAutoStoppedDate = "";
+    state.trackerAfterWorkAlertAt = 0;
+    state.trackerAutoStoppedAt = 0;
     entry.leaveType = "none";
     entry.customHoliday = false;
     entry.running = true;
@@ -1325,12 +1484,18 @@ function initTrackerTab(root, { state, persist }) {
     renderAll();
   }
 
-  function stopWorkNow(stopDate = getNow()) {
+  function stopWorkNow(stopDate = getNow(), options = {}) {
     const entry = getEntry(getDateKey(getToday()));
     entry.running = false;
     entry.liveStartTimestamp = null;
     entry.endTime = formatTimeValue(stopDate);
     if (!entry.startTime) entry.startTime = DEFAULT_START;
+    if (isSameDay(stopDate, getToday())) {
+      state.trackerAfterWorkMessageDate = getDateKey(getToday());
+      state.trackerAfterWorkAlertAt = stopDate.getTime();
+      state.trackerAutoStoppedDate = options.auto ? getDateKey(getToday()) : "";
+      state.trackerAutoStoppedAt = options.auto ? stopDate.getTime() : 0;
+    }
     persist();
     renderAll();
   }
@@ -1340,7 +1505,7 @@ function initTrackerTab(root, { state, persist }) {
     if (!isLiveWorkSession(entry)) return false;
     const autoStopDate = getAutoStopDate(entry, getToday());
     if (!autoStopDate || getNow().getTime() < autoStopDate.getTime()) return false;
-    stopWorkNow(autoStopDate);
+    stopWorkNow(autoStopDate, { manual: false, auto: true });
     return true;
   }
 
@@ -1427,6 +1592,9 @@ function initTrackerTab(root, { state, persist }) {
   renderAll();
   const timer = setInterval(renderSummary, 1000);
   return {
+    focusAlert() {
+      els.workToggleBtn?.scrollIntoView({ behavior: "smooth", block: "center" });
+    },
     destroy() {
       clearInterval(timer);
       if (toastTimer) clearTimeout(toastTimer);
@@ -1677,11 +1845,15 @@ const bookmarksTemplate = `
       <p class="hint">브라우저 북마크를 드래그 앤 드롭으로 가져와 추가할 수 있어요!</p>
     </div>
     <div class="bookmarks-header-actions">
-      <button id="bookmarkManageLabelsBtn" type="button" class="btn btn-muted bookmark-manage-labels-btn">라벨 관리</button>
       <div class="bookmarks-view-toggle" aria-label="북마크 보기 방식">
         <button id="bookmarkCardViewBtn" type="button" class="bookmark-view-btn" aria-pressed="true" title="카드로 보기">◫</button>
         <button id="bookmarkListViewBtn" type="button" class="bookmark-view-btn" aria-pressed="false" title="목록으로 보기">☰</button>
       </div>
+      <div class="bookmark-group-create">
+        <button id="bookmarkAddGroupBtn" type="button" class="btn btn-muted">그룹 추가</button>
+      </div>
+      <button id="bookmarkManageLabelsBtn" type="button" class="btn btn-muted bookmark-manage-labels-btn">라벨 관리</button>
+      <button id="bookmarkUrlToggleBtn" type="button" class="btn btn-muted bookmark-url-toggle-btn" aria-pressed="false">주소 가리기</button>
     </div>
   </div>
   <div class="bookmark-drop-hint" aria-hidden="true">
@@ -1722,8 +1894,19 @@ const bookmarksTemplate = `
         <input id="bookmarkNoteInput" type="text" placeholder="예: 회사 메일 확인" />
       </label>
       <label class="field">
+        <span>그룹</span>
+        <input id="bookmarkGroupInput" type="text" list="bookmarkGroupOptions" placeholder="예: 업무 / 포털 / 자주씀" />
+        <datalist id="bookmarkGroupOptions"></datalist>
+      </label>
+      <label class="field">
         <span>라벨</span>
         <div id="bookmarkLabelPicker" class="bookmark-label-picker"></div>
+        <div class="bookmark-label-select-row">
+          <select id="bookmarkLabelSelect" class="bookmark-label-select">
+            <option value="">라벨 선택</option>
+          </select>
+          <button id="bookmarkLabelAddBtn" type="button" class="btn btn-muted">추가</button>
+        </div>
       </label>
       <div id="bookmarkModalError" class="bookmark-modal-error" aria-live="polite"></div>
       <div class="button-row">
@@ -1751,7 +1934,7 @@ const bookmarksTemplate = `
       <div id="bookmarkLabelsEditorList" class="bookmark-labels-editor-list"></div>
       <div class="bookmark-labels-add-row">
         <input id="bookmarkNewLabelNameInput" type="text" placeholder="새 라벨 이름" />
-        <input id="bookmarkNewLabelColorInput" class="bookmark-color-input" type="color" value="#60a5fa" />
+        <input id="bookmarkNewLabelColorInput" class="bookmark-label-color-input" type="color" value="#60a5fa" />
         <button id="bookmarkAddLabelBtn" type="button" class="btn btn-primary">추가</button>
       </div>
       <div id="bookmarkLabelsModalError" class="bookmark-modal-error" aria-live="polite"></div>
@@ -1765,10 +1948,11 @@ const bookmarksTemplate = `
 const MAX_BOOKMARKS = 12;
 const DEFAULT_BOOKMARK_COLOR = "#93c5fd";
 const DEFAULT_BOOKMARKS = [
-  { id: "bookmark-default-naver", name: "네이버", url: "https://www.naver.com/", note: "포털", imageUrl: "", color: "", labels: ["포털"] },
-  { id: "bookmark-default-google", name: "구글", url: "https://www.google.com/", note: "검색", imageUrl: "", color: "", labels: ["검색"] }
+  { id: "bookmark-default-naver", name: "네이버", url: "https://www.naver.com/", note: "포털", imageUrl: "", color: "", group: "기본", labels: ["포털"] },
+  { id: "bookmark-default-google", name: "구글", url: "https://www.google.com/", note: "검색", imageUrl: "", color: "", group: "기본", labels: ["검색"] }
 ];
 const BOOKMARK_LABEL_COLOR_PALETTE = ["#60a5fa", "#34d399", "#f59e0b", "#f472b6", "#a78bfa", "#fb7185", "#2dd4bf", "#facc15"];
+const DEFAULT_BOOKMARK_GROUP = "기타";
 function ensureBookmarksState(state) {
   state.bookmarks = Array.isArray(state.bookmarks) ? state.bookmarks.filter((item) => item && typeof item === "object").slice(0, MAX_BOOKMARKS).map((item) => ({
     id: String(item.id || `bookmark-${Date.now()}`),
@@ -1777,10 +1961,34 @@ function ensureBookmarksState(state) {
     note: String(item.note || "").trim(),
     imageUrl: String(item.imageUrl || "").trim(),
     color: String(item.color || "").trim(),
+    group: normalizeBookmarkGroup(item.group),
     labels: normalizeBookmarkSelection(item.labels || item.tags)
   })) : [];
+  state.bookmarkGroups = normalizeBookmarkGroups(state.bookmarkGroups, state.bookmarks);
   state.bookmarkViewMode = state.bookmarkViewMode === "list" ? "list" : "card";
+  state.bookmarkShowUrl = state.bookmarkShowUrl !== false;
+  state.bookmarkActiveGroup = normalizeBookmarkActiveGroup(state.bookmarkActiveGroup);
   state.bookmarkLabels = normalizeBookmarkLabelDefinitions(state.bookmarkLabels, state.bookmarks, state.bookmarkLabelColors);
+}
+function normalizeBookmarkGroup(rawValue) {
+  return String(rawValue || "").trim().slice(0, 20);
+}
+function normalizeBookmarkGroups(rawValue, bookmarks = []) {
+  const groups = Array.isArray(rawValue) ? rawValue : [];
+  const values = groups.map((value) => normalizeBookmarkGroup(value)).filter(Boolean);
+  bookmarks.forEach((bookmark) => {
+    const group = normalizeBookmarkGroup(bookmark.group) || DEFAULT_BOOKMARK_GROUP;
+    values.push(group);
+  });
+  if (!values.length) values.push(DEFAULT_BOOKMARK_GROUP);
+  return values.filter((value, index, array) => array.indexOf(value) === index).slice(0, 24);
+}
+function normalizeBookmarkActiveGroup(rawValue) {
+  const value = String(rawValue || "전체").trim();
+  return value || "전체";
+}
+function getBookmarkGroups(bookmarks) {
+  return normalizeBookmarkGroups(state.bookmarkGroups, bookmarks);
 }
 function normalizeBookmarkSelection(rawValue) {
   const values = Array.isArray(rawValue) ? rawValue : String(rawValue || "").split(",");
@@ -1954,6 +2162,8 @@ function initBookmarksTab(root, { state, persist }) {
   const panel = root.querySelector(".bookmarks-card") || root;
   const els = {
     list: panel.querySelector("#bookmarkList"),
+    urlToggleBtn: panel.querySelector("#bookmarkUrlToggleBtn"),
+    addGroupBtn: panel.querySelector("#bookmarkAddGroupBtn"),
     cardViewBtn: panel.querySelector("#bookmarkCardViewBtn"),
     listViewBtn: panel.querySelector("#bookmarkListViewBtn"),
     manageLabelsBtn: panel.querySelector("#bookmarkManageLabelsBtn"),
@@ -1966,7 +2176,11 @@ function initBookmarksTab(root, { state, persist }) {
     colorInput: panel.querySelector("#bookmarkColorInput"),
     colorResetBtn: panel.querySelector("#bookmarkColorResetBtn"),
     noteInput: panel.querySelector("#bookmarkNoteInput"),
+    groupInput: panel.querySelector("#bookmarkGroupInput"),
+    groupOptions: panel.querySelector("#bookmarkGroupOptions"),
     labelPicker: panel.querySelector("#bookmarkLabelPicker"),
+    labelSelect: panel.querySelector("#bookmarkLabelSelect"),
+    labelAddBtn: panel.querySelector("#bookmarkLabelAddBtn"),
     labelsModal: panel.querySelector("#bookmarkLabelsModal"),
     labelsModalCloseBtn: panel.querySelector("#bookmarkLabelsModalCloseBtn"),
     labelsEditorList: panel.querySelector("#bookmarkLabelsEditorList"),
@@ -1986,6 +2200,8 @@ function initBookmarksTab(root, { state, persist }) {
   let editingBookmarkId = null;
   let pendingDeleteBookmarkId = null;
   let draggedBookmarkId = null;
+  let draggedGroupName = null;
+  let pendingFocusGroupName = "";
   let didDragReorder = false;
   let dropHoverDepth = 0;
   let draftSelectedLabels = [];
@@ -2004,6 +2220,8 @@ function initBookmarksTab(root, { state, persist }) {
     els.colorInput.value = draft?.color || DEFAULT_BOOKMARK_COLOR;
     els.colorInput.dataset.isDefault = draft?.color ? "false" : "true";
     els.noteInput.value = draft?.note || "";
+    els.groupInput.value = draft?.group || "";
+    renderGroupOptions();
     draftSelectedLabels = normalizeBookmarkSelection(draft?.labels);
     renderLabelPicker();
     els.error.textContent = "";
@@ -2018,33 +2236,100 @@ function initBookmarksTab(root, { state, persist }) {
     els.modal.classList.remove("open");
     els.modal.setAttribute("aria-hidden", "true");
   }
+  function renderGroupOptions() {
+    if (!els.groupOptions) return;
+    const groups = getBookmarkGroups(state.bookmarks);
+    els.groupOptions.innerHTML = groups.map((group) => `<option value="${escapeHtml(group)}"></option>`).join("");
+  }
+  function addBookmarkGroup(rawGroup) {
+    const group = normalizeBookmarkGroup(rawGroup);
+    if (!group) {
+      els.error.textContent = "그룹 이름을 입력해 주세요.";
+      return false;
+    }
+    if (state.bookmarkGroups.includes(group)) {
+      els.error.textContent = "이미 있는 그룹이에요.";
+      return false;
+    }
+    state.bookmarkGroups = normalizeBookmarkGroups([...state.bookmarkGroups, group], state.bookmarks);
+    persist();
+    renderGroupOptions();
+    render();
+    return true;
+  }
+  function createPendingBookmarkGroup() {
+    const tempGroup = `새 그룹 ${Date.now()}`;
+    state.bookmarkGroups = normalizeBookmarkGroups([...state.bookmarkGroups, tempGroup], state.bookmarks);
+    pendingFocusGroupName = tempGroup;
+    persist();
+    render();
+  }
+  function renameBookmarkGroup(previousGroup, nextGroupRaw) {
+    const oldName = normalizeBookmarkGroup(previousGroup) || DEFAULT_BOOKMARK_GROUP;
+    const nextName = normalizeBookmarkGroup(nextGroupRaw) || DEFAULT_BOOKMARK_GROUP;
+    if (!nextName) return false;
+    if (oldName === nextName) return true;
+    if (state.bookmarkGroups.includes(nextName)) {
+      els.error.textContent = "같은 이름의 그룹이 이미 있어요.";
+      return false;
+    }
+    state.bookmarkGroups = state.bookmarkGroups.map((group) => group === oldName ? nextName : group);
+    state.bookmarks = state.bookmarks.map((bookmark) => ({
+      ...bookmark,
+      group: (normalizeBookmarkGroup(bookmark.group) || DEFAULT_BOOKMARK_GROUP) === oldName ? nextName : bookmark.group
+    }));
+    persist();
+    pendingFocusGroupName = nextName;
+    renderGroupOptions();
+    render();
+    return true;
+  }
+  function renderLabelSelectOptions() {
+    if (!els.labelSelect) return;
+    const availableLabels = state.bookmarkLabels.filter((label) => !draftSelectedLabels.includes(label.name));
+    els.labelSelect.innerHTML = [
+      `<option value="">${state.bookmarkLabels.length ? "라벨 선택" : "라벨 없음"}</option>`,
+      ...availableLabels.map((label) => `<option value="${escapeHtml(label.name)}">${escapeHtml(label.name)}</option>`)
+    ].join("");
+    els.labelSelect.disabled = !availableLabels.length;
+    if (!availableLabels.length) {
+      els.labelSelect.value = "";
+    }
+  }
   function renderLabelPicker() {
     if (!els.labelPicker) return;
     if (!state.bookmarkLabels.length) {
       els.labelPicker.innerHTML = `<div class="bookmark-label-picker-empty">라벨 관리에서 먼저 라벨을 만들어 주세요.</div>`;
+      renderLabelSelectOptions();
       return;
     }
-    els.labelPicker.innerHTML = state.bookmarkLabels.map((label) => {
-      const selected = draftSelectedLabels.includes(label.name);
-      return `<button type="button" class="bookmark-label-option${selected ? " selected" : ""}" data-bookmark-label-option="${escapeHtml(label.name)}"><span class="bookmark-tag" style="${getBookmarkTagStyle(label.name, state.bookmarkLabels)}">${escapeHtml(label.name)}</span></button>`;
-    }).join("");
-    els.labelPicker.querySelectorAll("[data-bookmark-label-option]").forEach((button) => {
+    els.labelPicker.innerHTML = "";
+    if (!draftSelectedLabels.length) {
+      els.labelPicker.innerHTML = `<div class="bookmark-label-picker-empty">선택된 라벨이 없어요.</div>`;
+      renderLabelSelectOptions();
+      return;
+    }
+    draftSelectedLabels.forEach((labelName) => {
+      const button = document.createElement("button");
+      button.type = "button";
+      button.className = "bookmark-label-option selected";
+      button.dataset.bookmarkLabelOption = labelName;
+      button.title = "클릭하면 라벨 선택이 해제돼요.";
+      const chip = document.createElement("span");
+      chip.className = "bookmark-tag";
+      chip.setAttribute("style", getBookmarkTagStyle(labelName, state.bookmarkLabels));
+      chip.textContent = labelName;
+      button.appendChild(chip);
+
       button.addEventListener("click", () => {
-        const name = button.dataset.bookmarkLabelOption;
-        if (!name) return;
-        if (draftSelectedLabels.includes(name)) {
-          draftSelectedLabels = draftSelectedLabels.filter((item) => item !== name);
-        } else {
-          if (draftSelectedLabels.length >= 3) {
-            els.error.textContent = "라벨은 최대 3개까지 선택할 수 있어요.";
-            return;
-          }
-          draftSelectedLabels = [...draftSelectedLabels, name];
-        }
+        draftSelectedLabels = draftSelectedLabels.filter((item) => item !== labelName);
         els.error.textContent = "";
         renderLabelPicker();
       });
+
+      els.labelPicker.appendChild(button);
     });
+    renderLabelSelectOptions();
   }
   function openLabelsModal() {
     ensureBookmarksState(state);
@@ -2061,65 +2346,83 @@ function initBookmarksTab(root, { state, persist }) {
   }
   function renderLabelsEditor() {
     ensureBookmarksState(state);
-    els.labelsEditorList.innerHTML = state.bookmarkLabels.map((label) => `
-      <div class="bookmark-managed-label-row" data-bookmark-managed-label="${escapeHtml(label.name)}">
-        <span class="bookmark-tag" style="${getBookmarkTagStyle(label.name, state.bookmarkLabels)}">${escapeHtml(label.name)}</span>
-        <input class="bookmark-managed-label-name" data-bookmark-label-name="${escapeHtml(label.name)}" type="text" value="${escapeHtml(label.name)}" />
-        <input class="bookmark-label-color-input" data-bookmark-label-color="${escapeHtml(label.name)}" type="color" value="${escapeHtml(label.color)}" />
-        <button type="button" class="btn btn-muted bookmark-managed-label-delete" data-bookmark-label-delete="${escapeHtml(label.name)}">삭제</button>
-      </div>
-    `).join("");
-    els.labelsEditorList.querySelectorAll("[data-bookmark-label-color]").forEach((input) => {
-      input.addEventListener("input", () => {
-        const name = input.dataset.bookmarkLabelColor;
-        const color = normalizeBookmarkColor(input.value);
-        if (!name || !color) return;
-        state.bookmarkLabels = state.bookmarkLabels.map((label) => label.name === name ? { ...label, color } : label);
+    els.labelsEditorList.innerHTML = "";
+    state.bookmarkLabels.forEach((label) => {
+      const row = document.createElement("div");
+      row.className = "bookmark-managed-label-row";
+      row.dataset.bookmarkManagedLabel = label.name;
+
+      const chip = document.createElement("span");
+      chip.className = "bookmark-tag";
+      chip.setAttribute("style", getBookmarkTagStyle(label.name, state.bookmarkLabels));
+      chip.textContent = label.name;
+
+      const nameInput = document.createElement("input");
+      nameInput.className = "bookmark-managed-label-name";
+      nameInput.type = "text";
+      nameInput.value = label.name;
+
+      const colorInput = document.createElement("input");
+      colorInput.className = "bookmark-label-color-input";
+      colorInput.type = "color";
+      colorInput.value = normalizeBookmarkColor(label.color) || getAutoBookmarkLabelColor(label.name);
+
+      const deleteBtn = document.createElement("button");
+      deleteBtn.type = "button";
+      deleteBtn.className = "btn btn-muted bookmark-managed-label-delete";
+      deleteBtn.textContent = "삭제";
+
+      colorInput.addEventListener("change", () => {
+        const color = normalizeBookmarkColor(colorInput.value);
+        if (!color) return;
+        state.bookmarkLabels = state.bookmarkLabels.map((item) => item.name === label.name ? { ...item, color } : item);
         persist();
         renderLabelsEditor();
+        renderLabelPicker();
         render();
       });
-    });
-    els.labelsEditorList.querySelectorAll("[data-bookmark-label-name]").forEach((input) => {
-      input.addEventListener("change", () => {
-        const previousName = input.dataset.bookmarkLabelName;
-        const nextName = String(input.value || "").trim();
+
+      nameInput.addEventListener("change", () => {
+        const previousName = label.name;
+        const nextName = String(nameInput.value || "").trim();
         if (!previousName || !nextName || previousName === nextName) {
           renderLabelsEditor();
           return;
         }
-        if (state.bookmarkLabels.some((label) => label.name === nextName)) {
+        if (state.bookmarkLabels.some((item) => item.name === nextName)) {
           els.labelsModalError.textContent = "같은 이름의 라벨이 이미 있어요.";
           renderLabelsEditor();
           return;
         }
-        state.bookmarkLabels = state.bookmarkLabels.map((label) => label.name === previousName ? { ...label, name: nextName } : label);
+        state.bookmarkLabels = state.bookmarkLabels.map((item) => item.name === previousName ? { ...item, name: nextName } : item);
         state.bookmarks = state.bookmarks.map((bookmark) => ({
           ...bookmark,
-          labels: normalizeBookmarkSelection(bookmark.labels).map((label) => label === previousName ? nextName : label)
+          labels: normalizeBookmarkSelection(bookmark.labels).map((item) => item === previousName ? nextName : item)
         }));
-        draftSelectedLabels = draftSelectedLabels.map((label) => label === previousName ? nextName : label);
+        draftSelectedLabels = draftSelectedLabels.map((item) => item === previousName ? nextName : item);
         persist();
         els.labelsModalError.textContent = "";
         renderLabelsEditor();
         renderLabelPicker();
         render();
       });
-    });
-    els.labelsEditorList.querySelectorAll("[data-bookmark-label-delete]").forEach((button) => {
-      button.addEventListener("click", () => {
-        const name = button.dataset.bookmarkLabelDelete;
-        state.bookmarkLabels = state.bookmarkLabels.filter((label) => label.name !== name);
+
+      deleteBtn.addEventListener("click", () => {
+        const name = label.name;
+        state.bookmarkLabels = state.bookmarkLabels.filter((item) => item.name !== name);
         state.bookmarks = state.bookmarks.map((bookmark) => ({
           ...bookmark,
-          labels: normalizeBookmarkSelection(bookmark.labels).filter((label) => label !== name)
+          labels: normalizeBookmarkSelection(bookmark.labels).filter((item) => item !== name)
         }));
-        draftSelectedLabels = draftSelectedLabels.filter((label) => label !== name);
+        draftSelectedLabels = draftSelectedLabels.filter((item) => item !== name);
         persist();
         renderLabelsEditor();
         renderLabelPicker();
         render();
       });
+
+      row.append(chip, nameInput, colorInput, deleteBtn);
+      els.labelsEditorList.appendChild(row);
     });
   }
   function openDeleteConfirm(bookmarkId) {
@@ -2142,6 +2445,7 @@ function initBookmarksTab(root, { state, persist }) {
     const imageUrl = normalizeBookmarkUrl(els.imageUrlInput.value);
     const color = els.colorInput.dataset.isDefault === "true" ? "" : normalizeBookmarkColor(els.colorInput.value);
     const note = String(els.noteInput.value || "").trim();
+    const group = normalizeBookmarkGroup(els.groupInput.value) || DEFAULT_BOOKMARK_GROUP;
     const labels = normalizeBookmarkSelection(draftSelectedLabels);
     if (!name) {
       els.error.textContent = "북마크 이름을 입력해 주세요.";
@@ -2154,14 +2458,15 @@ function initBookmarksTab(root, { state, persist }) {
       return;
     }
     if (editingBookmarkId) {
-      state.bookmarks = state.bookmarks.map((item) => item.id === editingBookmarkId ? { ...item, name, url, note, imageUrl, color, labels } : item);
+      state.bookmarks = state.bookmarks.map((item) => item.id === editingBookmarkId ? { ...item, name, url, note, imageUrl, color, group, labels } : item);
     } else {
       if (state.bookmarks.length >= MAX_BOOKMARKS) {
         els.error.textContent = `북마크는 최대 ${MAX_BOOKMARKS}개까지 저장할 수 있어요.`;
         return;
       }
-      state.bookmarks = [...state.bookmarks, { id: `bookmark-${Date.now()}`, name, url, note, imageUrl, color, labels }];
+      state.bookmarks = [...state.bookmarks, { id: `bookmark-${Date.now()}`, name, url, note, imageUrl, color, group, labels }];
     }
+    state.bookmarkGroups = normalizeBookmarkGroups([...state.bookmarkGroups, group], state.bookmarks);
     persist();
     closeModal();
     render();
@@ -2191,24 +2496,66 @@ function initBookmarksTab(root, { state, persist }) {
     didDragReorder = true;
     render();
   }
+  function moveBookmarkToGroup(bookmarkId, nextGroup) {
+    const group = normalizeBookmarkGroup(nextGroup) || DEFAULT_BOOKMARK_GROUP;
+    state.bookmarks = state.bookmarks.map((item) => item.id === bookmarkId ? { ...item, group } : item);
+    state.bookmarkGroups = normalizeBookmarkGroups([...state.bookmarkGroups, group], state.bookmarks);
+    persist();
+    didDragReorder = true;
+    render();
+  }
+  function reorderBookmarkGroups(fromGroup, toGroup) {
+    if (!fromGroup || !toGroup || fromGroup === toGroup) return;
+    const sourceIndex = state.bookmarkGroups.findIndex((group) => group === fromGroup);
+    const targetIndex = state.bookmarkGroups.findIndex((group) => group === toGroup);
+    if (sourceIndex < 0 || targetIndex < 0) return;
+    const next = [...state.bookmarkGroups];
+    const [moved] = next.splice(sourceIndex, 1);
+    next.splice(targetIndex, 0, moved);
+    state.bookmarkGroups = next;
+    persist();
+    didDragReorder = true;
+    render();
+  }
   function clearExternalDropState() {
     dropHoverDepth = 0;
     panel.classList.remove("drop-target");
   }
-  function handleExternalBookmarkDrop(event) {
+  function addDroppedBookmarkToGroup(dropped, groupName) {
+    const group = normalizeBookmarkGroup(groupName) || DEFAULT_BOOKMARK_GROUP;
+    ensureBookmarksState(state);
+    const existing = state.bookmarks.find((item) => item.url === dropped.url);
+    if (existing) {
+      state.bookmarks = state.bookmarks.map((item) => item.id === existing.id ? { ...item, group } : item);
+      state.bookmarkGroups = normalizeBookmarkGroups([...state.bookmarkGroups, group], state.bookmarks);
+      persist();
+      render();
+      return;
+    }
+    if (state.bookmarks.length >= MAX_BOOKMARKS) {
+      return;
+    }
+    state.bookmarks = [...state.bookmarks, {
+      id: `bookmark-${Date.now()}`,
+      name: dropped.name || getBookmarkHostname(dropped.url) || "북마크",
+      url: dropped.url,
+      note: "",
+      imageUrl: "",
+      color: "",
+      group,
+      labels: []
+    }];
+    state.bookmarkGroups = normalizeBookmarkGroups([...state.bookmarkGroups, group], state.bookmarks);
+    persist();
+    render();
+  }
+  function handleExternalBookmarkDrop(event, groupName) {
     event.preventDefault();
     event.stopPropagation();
     clearExternalDropState();
     const dropped = parseDroppedBookmarkData(event.dataTransfer);
     if (!dropped) return;
-    ensureBookmarksState(state);
-    const existing = state.bookmarks.find((item) => item.url === dropped.url);
-    if (existing) {
-      openModal(existing.id);
-      els.error.textContent = "이미 저장된 북마크예요.";
-      return;
-    }
-    openModal(null, dropped);
+    addDroppedBookmarkToGroup(dropped, groupName);
   }
   function bindBookmarkFaviconFallback() {
     els.list.querySelectorAll("[data-bookmark-favicon]").forEach((img) => {
@@ -2245,47 +2592,130 @@ function initBookmarksTab(root, { state, persist }) {
   function render() {
     ensureBookmarksState(state);
     panel.classList.toggle("bookmark-list-mode", state.bookmarkViewMode === "list");
+    panel.classList.toggle("bookmark-hide-url", !state.bookmarkShowUrl);
     els.cardViewBtn?.setAttribute("aria-pressed", String(state.bookmarkViewMode === "card"));
     els.listViewBtn?.setAttribute("aria-pressed", String(state.bookmarkViewMode === "list"));
-    const bookmarkCards = state.bookmarks.map((bookmark) => {
-      const hostname = getBookmarkHostname(bookmark.url);
-      const faviconCandidates = getBookmarkFaviconCandidates(bookmark.url);
-      return `
-        <article class="bookmark-item" data-bookmark-open="${bookmark.id}" data-bookmark-id="${bookmark.id}" draggable="true" style="${getBookmarkThemeStyle(bookmark)}">
-          ${bookmark.imageUrl ? `<img class="bookmark-cover" src="${escapeHtml(bookmark.imageUrl)}" alt="" loading="lazy" referrerpolicy="no-referrer" />` : ""}
-          <div class="bookmark-item-top">
-            <div class="bookmark-media">
-              <img
-                class="bookmark-favicon"
-                data-bookmark-favicon
-                data-bookmark-index="0"
-                data-bookmark-fallbacks='${escapeHtml(JSON.stringify(faviconCandidates))}'
-                src="${escapeHtml(faviconCandidates[0] || "")}"
-                alt=""
-                loading="lazy"
-                referrerpolicy="no-referrer"
-              />
-              <div class="bookmark-badge">${escapeHtml(getBookmarkInitial(bookmark.name, bookmark.url))}</div>
+    els.urlToggleBtn?.setAttribute("aria-pressed", String(state.bookmarkShowUrl));
+    if (els.urlToggleBtn) {
+      els.urlToggleBtn.textContent = state.bookmarkShowUrl ? "주소 보이기" : "주소 가리기";
+    }
+    renderGroupOptions();
+    const groups = getBookmarkGroups(state.bookmarks);
+    const sectionHtml = groups.map((group) => {
+      const groupBookmarks = state.bookmarks.filter((bookmark) => (normalizeBookmarkGroup(bookmark.group) || DEFAULT_BOOKMARK_GROUP) === group);
+      const bookmarkCards = groupBookmarks.map((bookmark) => {
+        const hostname = getBookmarkHostname(bookmark.url);
+        const faviconCandidates = getBookmarkFaviconCandidates(bookmark.url);
+        return `
+          <article class="bookmark-item" data-bookmark-open="${bookmark.id}" data-bookmark-id="${bookmark.id}" data-bookmark-group="${escapeHtml(group)}" draggable="true" style="${getBookmarkThemeStyle(bookmark)}">
+            ${bookmark.imageUrl ? `<img class="bookmark-cover" src="${escapeHtml(bookmark.imageUrl)}" alt="" loading="lazy" referrerpolicy="no-referrer" />` : ""}
+            <div class="bookmark-item-top">
+              <div class="bookmark-media">
+                <img
+                  class="bookmark-favicon"
+                  data-bookmark-favicon
+                  data-bookmark-index="0"
+                  data-bookmark-fallbacks='${escapeHtml(JSON.stringify(faviconCandidates))}'
+                  src="${escapeHtml(faviconCandidates[0] || "")}"
+                  alt=""
+                  loading="lazy"
+                  referrerpolicy="no-referrer"
+                />
+                <div class="bookmark-badge">${escapeHtml(getBookmarkInitial(bookmark.name, bookmark.url))}</div>
+              </div>
+              <div class="bookmark-item-actions">
+                <button type="button" class="bookmark-icon-btn" data-bookmark-edit="${bookmark.id}" aria-label="북마크 수정">✎</button>
+              </div>
             </div>
-            <div class="bookmark-item-actions">
-              <button type="button" class="bookmark-icon-btn" data-bookmark-edit="${bookmark.id}" aria-label="북마크 수정">✎</button>
+            <h3>${escapeHtml(bookmark.name)}</h3>
+            ${renderBookmarkTagBadges(bookmark.labels)}
+            ${state.bookmarkShowUrl ? `<div class="bookmark-host">${escapeHtml(hostname || bookmark.url)}</div>` : ""}
+            ${bookmark.note ? `<p class="bookmark-note">${escapeHtml(bookmark.note)}</p>` : ""}
+          </article>
+        `;
+      }).join("");
+      const addCard = state.bookmarks.length < MAX_BOOKMARKS ? `
+        <button type="button" class="bookmark-item bookmark-item-add" data-bookmark-add-group="${escapeHtml(group)}" aria-label="${escapeHtml(group)} 그룹에 북마크 추가">
+          <span class="bookmark-add-plus">+</span>
+          <span class="bookmark-add-text">${escapeHtml(group)}에 추가</span>
+        </button>
+      ` : "";
+      return `
+        <section class="bookmark-group-section" data-bookmark-section="${escapeHtml(group)}" data-bookmark-group-order="${escapeHtml(group)}" draggable="true">
+          <div class="bookmark-group-section-header">
+            <div class="bookmark-group-title-row">
+              <h3>${escapeHtml(group)}</h3>
+              <input type="text" class="bookmark-group-title-input" data-bookmark-group-input="${escapeHtml(group)}" value="${escapeHtml(group)}" ${pendingFocusGroupName === group ? "" : "hidden"} />
+              <button type="button" class="bookmark-group-edit-btn" data-bookmark-group-edit="${escapeHtml(group)}" aria-label="그룹 이름 수정">✎</button>
             </div>
           </div>
-          <h3>${escapeHtml(bookmark.name)}</h3>
-          ${renderBookmarkTagBadges(bookmark.labels)}
-          <div class="bookmark-host">${escapeHtml(hostname || bookmark.url)}</div>
-          <p class="bookmark-note">${escapeHtml(bookmark.note || "새 탭으로 열기")}</p>
-        </article>
+          <div class="bookmark-group-list" data-bookmark-group-drop="${escapeHtml(group)}">
+            ${bookmarkCards || `<div class="bookmark-group-empty">이 그룹엔 아직 북마크가 없어요.</div>`}
+            ${addCard}
+          </div>
+        </section>
       `;
     }).join("");
-    const addCard = state.bookmarks.length < MAX_BOOKMARKS ? `
-      <button type="button" class="bookmark-item bookmark-item-add" id="bookmarkAddBtn" aria-label="북마크 추가">
-        <span class="bookmark-add-plus">+</span>
-        <span class="bookmark-add-text">북마크 추가</span>
-      </button>
-    ` : "";
-    els.list.innerHTML = bookmarkCards + addCard;
-    els.list.querySelector("#bookmarkAddBtn")?.addEventListener("click", () => openModal());
+    els.list.innerHTML = sectionHtml || `<div class="bookmark-empty-copy">그룹을 먼저 추가해보세요.</div>`;
+    els.list.querySelectorAll("[data-bookmark-add-group]").forEach((button) => {
+      button.addEventListener("click", (event) => {
+        event.stopPropagation();
+        openModal(null, { group: button.dataset.bookmarkAddGroup || DEFAULT_BOOKMARK_GROUP });
+      });
+    });
+    els.list.querySelectorAll("[data-bookmark-group-edit]").forEach((button) => {
+      button.addEventListener("click", (event) => {
+        event.stopPropagation();
+        const group = button.dataset.bookmarkGroupEdit || "";
+        const section = button.closest("[data-bookmark-section]");
+        const input = section?.querySelector("[data-bookmark-group-input]");
+        const title = section?.querySelector(".bookmark-group-title-row h3");
+        if (!input || !title) return;
+        input.hidden = false;
+        title.hidden = true;
+        button.hidden = true;
+        requestAnimationFrame(() => {
+          input.focus();
+          input.select();
+        });
+      });
+    });
+    els.list.querySelectorAll("[data-bookmark-group-input]").forEach((input) => {
+      const finishEdit = () => {
+        const section = input.closest("[data-bookmark-section]");
+        const currentGroup = section?.dataset.bookmarkSection || "";
+        renameBookmarkGroup(currentGroup, input.value);
+      };
+      input.addEventListener("keydown", (event) => {
+        if (event.key === "Enter") {
+          event.preventDefault();
+          finishEdit();
+        }
+        if (event.key === "Escape") {
+          render();
+        }
+      });
+      input.addEventListener("blur", finishEdit);
+    });
+    if (pendingFocusGroupName) {
+      const section = els.list.querySelector(`[data-bookmark-section="${pendingFocusGroupName}"]`);
+      const input = section?.querySelector("[data-bookmark-group-input]");
+      const title = section?.querySelector(".bookmark-group-title-row h3");
+      const editBtn = section?.querySelector("[data-bookmark-group-edit]");
+      if (section) {
+        section.scrollIntoView({ behavior: "smooth", block: "center" });
+      }
+      if (input && title && editBtn) {
+        input.hidden = false;
+        title.hidden = true;
+        editBtn.hidden = true;
+        requestAnimationFrame(() => {
+          input.focus();
+          input.select();
+        });
+      }
+      pendingFocusGroupName = "";
+    }
     els.list.querySelectorAll("[data-bookmark-open]").forEach((card) => {
       card.addEventListener("click", () => {
         if (didDragReorder) {
@@ -2318,8 +2748,63 @@ function initBookmarksTab(root, { state, persist }) {
         if (draggedBookmarkId) {
           event.preventDefault();
           card.classList.remove("drag-over");
+          const targetGroup = card.dataset.bookmarkGroup || DEFAULT_BOOKMARK_GROUP;
+          state.bookmarks = state.bookmarks.map((item) => item.id === draggedBookmarkId ? { ...item, group: targetGroup } : item);
           reorderBookmarks(draggedBookmarkId, card.dataset.bookmarkId);
         }
+      });
+    });
+    els.list.querySelectorAll("[data-bookmark-group-drop]").forEach((section) => {
+      section.addEventListener("dragover", (event) => {
+        if (draggedBookmarkId) {
+          event.preventDefault();
+          section.classList.add("drag-over");
+          return;
+        }
+        if (!hasBookmarkDropPayload(event.dataTransfer)) return;
+        event.preventDefault();
+        section.classList.add("drag-over");
+      });
+      section.addEventListener("dragleave", () => {
+        section.classList.remove("drag-over");
+      });
+      section.addEventListener("drop", (event) => {
+        section.classList.remove("drag-over");
+        if (draggedBookmarkId) {
+          event.preventDefault();
+          moveBookmarkToGroup(draggedBookmarkId, section.dataset.bookmarkGroupDrop || DEFAULT_BOOKMARK_GROUP);
+          return;
+        }
+        if (!hasBookmarkDropPayload(event.dataTransfer)) return;
+        handleExternalBookmarkDrop(event, section.dataset.bookmarkGroupDrop || DEFAULT_BOOKMARK_GROUP);
+      });
+    });
+    els.list.querySelectorAll("[data-bookmark-group-order]").forEach((section) => {
+      section.addEventListener("dragstart", () => {
+        if (draggedBookmarkId) return;
+        draggedGroupName = section.dataset.bookmarkGroupOrder;
+        section.classList.add("dragging");
+      });
+      section.addEventListener("dragend", () => {
+        draggedGroupName = null;
+        section.classList.remove("dragging");
+        requestAnimationFrame(() => {
+          didDragReorder = false;
+        });
+      });
+      section.addEventListener("dragover", (event) => {
+        if (!draggedGroupName || draggedGroupName === section.dataset.bookmarkGroupOrder) return;
+        event.preventDefault();
+        section.classList.add("drag-over");
+      });
+      section.addEventListener("dragleave", () => {
+        section.classList.remove("drag-over");
+      });
+      section.addEventListener("drop", (event) => {
+        if (!draggedGroupName) return;
+        event.preventDefault();
+        section.classList.remove("drag-over");
+        reorderBookmarkGroups(draggedGroupName, section.dataset.bookmarkGroupOrder || "");
       });
     });
     els.list.querySelectorAll("[data-bookmark-edit]").forEach((button) => {
@@ -2343,7 +2828,30 @@ function initBookmarksTab(root, { state, persist }) {
     persist();
     render();
   });
+  els.urlToggleBtn?.addEventListener("click", () => {
+    state.bookmarkShowUrl = !state.bookmarkShowUrl;
+    persist();
+    render();
+  });
+  els.addGroupBtn?.addEventListener("click", () => {
+    createPendingBookmarkGroup();
+  });
   els.manageLabelsBtn?.addEventListener("click", openLabelsModal);
+  els.labelAddBtn?.addEventListener("click", () => {
+    const labelName = String(els.labelSelect?.value || "").trim();
+    if (!labelName) return;
+    if (draftSelectedLabels.includes(labelName)) {
+      els.error.textContent = "이미 선택한 라벨이에요.";
+      return;
+    }
+    if (draftSelectedLabels.length >= 3) {
+      els.error.textContent = "라벨은 최대 3개까지 선택할 수 있어요.";
+      return;
+    }
+    draftSelectedLabels = [...draftSelectedLabels, labelName];
+    els.error.textContent = "";
+    renderLabelPicker();
+  });
   els.modal.addEventListener("click", (event) => {
     if (event.target === els.modal) closeModal();
   });
@@ -2372,28 +2880,13 @@ function initBookmarksTab(root, { state, persist }) {
     render();
   });
   panel.addEventListener("dragenter", (event) => {
-    if (draggedBookmarkId) return;
+    if (draggedBookmarkId || draggedGroupName) return;
     if (!hasBookmarkDropPayload(event.dataTransfer)) return;
     dropHoverDepth += 1;
-    panel.classList.add("drop-target");
-  });
-  panel.addEventListener("dragover", (event) => {
-    if (draggedBookmarkId) return;
-    if (!hasBookmarkDropPayload(event.dataTransfer)) return;
-    event.preventDefault();
-    event.dataTransfer.dropEffect = "copy";
-    panel.classList.add("drop-target");
   });
   panel.addEventListener("dragleave", () => {
-    if (draggedBookmarkId) return;
+    if (draggedBookmarkId || draggedGroupName) return;
     dropHoverDepth = Math.max(0, dropHoverDepth - 1);
-    if (!dropHoverDepth) {
-      panel.classList.remove("drop-target");
-    }
-  });
-  panel.addEventListener("drop", (event) => {
-    if (draggedBookmarkId) return;
-    handleExternalBookmarkDrop(event);
   });
   els.colorInput?.addEventListener("input", () => {
     els.colorInput.dataset.isDefault = "false";
@@ -3245,6 +3738,10 @@ function initTodoTab(root, { state, persist }) {
           return [item];
         }
 
+        if (item.completed) {
+          return [];
+        }
+
         if (item.recurrence === "none" || !matchesRecurringDate(item, targetDate)) {
           return [];
         }
@@ -3765,7 +4262,6 @@ const lunchTemplate = `
           <strong id="lunchTimeSummary" class="lunch-schedule-inline-value">등록해주세요!</strong>
         </button>
       </div>
-      <div id="lunchLocationStatus" class="lunch-location-status">위치 권한을 허용하면 근처 식당을 실시간으로 불러와요.</div>
     </div>
     <div class="lunch-top-side">
       <div class="lunch-actions">
@@ -3795,6 +4291,7 @@ const lunchTemplate = `
           <input id="lunchSearchInput" type="search" placeholder="식당명, 메뉴, 주소로 검색" />
         </label>
       </div>
+      <button id="lunchAddPlaceBtn" class="btn btn-muted lunch-add-place-btn">식당 추가</button>
     </div>
   </div>
   <div id="lunchList" class="lunch-list"></div>
@@ -3853,6 +4350,44 @@ const lunchTemplate = `
       </div>
     </div>
   </div>
+
+  <div id="lunchPlaceModal" class="lunch-draw-modal" aria-hidden="true">
+    <div class="lunch-draw-panel lunch-schedule-panel">
+      <button id="lunchPlaceCloseBtn" type="button" class="btn btn-muted lunch-draw-close" aria-label="직접 추가 식당 설정 닫기">✕</button>
+      <div class="bookmark-modal-kicker">직접 추가</div>
+      <h3 class="lunch-draw-title">음식점 추가</h3>
+      <div class="todo-form-grid">
+        <label class="field">
+          <span>식당 이름</span>
+          <input id="lunchPlaceNameInput" type="text" placeholder="예: 우리끼리분식" />
+        </label>
+        <label class="field">
+          <span>카테고리</span>
+          <select id="lunchPlaceCategoryInput"></select>
+        </label>
+        <label class="field field-span-2">
+          <span>주소</span>
+          <input id="lunchPlaceAddressInput" type="text" placeholder="예: 서울시 강남구 ..." />
+        </label>
+        <label class="field">
+          <span>지도 링크</span>
+          <input id="lunchPlaceMapUrlInput" type="url" placeholder="https://..." />
+        </label>
+        <label class="field">
+          <span>메모</span>
+          <input id="lunchPlaceNoteInput" type="text" placeholder="예: 사내 추천, 숨은 맛집" />
+        </label>
+      </div>
+      <div id="lunchPlaceError" class="bookmark-modal-error" aria-live="polite"></div>
+      <div class="button-row">
+        <button id="lunchPlaceDeleteBtn" type="button" class="btn btn-stop" hidden>삭제</button>
+        <div class="button-row" style="margin-left:auto;">
+        <button id="lunchPlaceCancelBtn" type="button" class="btn btn-muted">취소</button>
+        <button id="lunchPlaceSaveBtn" type="button" class="btn btn-primary">저장</button>
+        </div>
+      </div>
+    </div>
+  </div>
 </section>
 `;
 
@@ -3885,6 +4420,7 @@ const cuisineMatchers = {
 // ever wants higher place coverage and the team is okay with API key usage/quota.
 function initLunchTab(root, { state, persist }) {
   const els = {
+    addPlaceBtn: root.querySelector("#lunchAddPlaceBtn"),
     drawBtn: root.querySelector("#lunchDrawBtn"),
     alertBadge: root.querySelector("#lunchAlertBadge"),
     locateBtn: root.querySelector("#lunchLocateBtn"),
@@ -3913,7 +4449,18 @@ function initLunchTab(root, { state, persist }) {
     scheduleSaveBtn: root.querySelector("#lunchScheduleSaveBtn"),
     scheduleStartInput: root.querySelector("#lunchScheduleStartInput"),
     scheduleEndInput: root.querySelector("#lunchScheduleEndInput"),
-    scheduleError: root.querySelector("#lunchScheduleError")
+    scheduleError: root.querySelector("#lunchScheduleError"),
+    placeModal: root.querySelector("#lunchPlaceModal"),
+    placeCloseBtn: root.querySelector("#lunchPlaceCloseBtn"),
+    placeCancelBtn: root.querySelector("#lunchPlaceCancelBtn"),
+    placeSaveBtn: root.querySelector("#lunchPlaceSaveBtn"),
+    placeDeleteBtn: root.querySelector("#lunchPlaceDeleteBtn"),
+    placeNameInput: root.querySelector("#lunchPlaceNameInput"),
+    placeCategoryInput: root.querySelector("#lunchPlaceCategoryInput"),
+    placeAddressInput: root.querySelector("#lunchPlaceAddressInput"),
+    placeMapUrlInput: root.querySelector("#lunchPlaceMapUrlInput"),
+    placeNoteInput: root.querySelector("#lunchPlaceNoteInput"),
+    placeError: root.querySelector("#lunchPlaceError")
   };
 
   let isFetching = false;
@@ -3924,12 +4471,16 @@ function initLunchTab(root, { state, persist }) {
   let isDrawing = false;
   let selectedDrawPlaceId = "";
   let tabAlertTimer = null;
+  let editingCustomPlaceId = "";
 
   if (els.drawModal && els.drawModal.parentElement !== document.body) {
     document.body.appendChild(els.drawModal);
   }
   if (els.scheduleModal && els.scheduleModal.parentElement !== document.body) {
     document.body.appendChild(els.scheduleModal);
+  }
+  if (els.placeModal && els.placeModal.parentElement !== document.body) {
+    document.body.appendChild(els.placeModal);
   }
 
   function getFavoriteIconMarkup(active) {
@@ -3979,6 +4530,52 @@ function initLunchTab(root, { state, persist }) {
     state.lunchCachedPlaces = Array.isArray(state.lunchCachedPlaces) ? state.lunchCachedPlaces : [];
     state.lunchLastLocation = state.lunchLastLocation && typeof state.lunchLastLocation === "object" ? state.lunchLastLocation : null;
     state.lunchLastFetchAt = state.lunchLastFetchAt || "";
+    state.lunchCustomPlaces = Array.isArray(state.lunchCustomPlaces) ? state.lunchCustomPlaces.map((item) => ({
+      id: String(item?.id || `custom-${Date.now()}`),
+      name: String(item?.name || "").trim(),
+      category: lunchCategories.includes(item?.category) && item?.category !== CATEGORY_ALL ? item.category : CATEGORY_OTHER,
+      address: String(item?.address || "").trim(),
+      mapUrl: String(item?.mapUrl || "").trim(),
+      note: String(item?.note || "").trim()
+    })).filter((item) => item.name) : [];
+  }
+
+  function categoryToCuisine(category) {
+    const map = {
+      [CATEGORY_KOREAN]: "korean",
+      [CATEGORY_CHINESE]: "chinese",
+      [CATEGORY_JAPANESE]: "japanese",
+      [CATEGORY_WESTERN]: "western",
+      [CATEGORY_BUNSIK]: "street_food",
+      [CATEGORY_SALAD]: "salad",
+      [CATEGORY_OTHER]: "restaurant"
+    };
+    return map[category] || "restaurant";
+  }
+
+  function normalizeCustomPlace(place, index = 0) {
+    return {
+      id: place.id,
+      lat: 0,
+      lon: 0,
+      custom: true,
+      mapUrl: place.mapUrl || "",
+      address: place.address || "주소 정보 없음",
+      cuisineLabel: place.note || place.category,
+      distanceMeters: 999999 + index,
+      tags: {
+        name: place.name,
+        amenity: "restaurant",
+        cuisine: categoryToCuisine(place.category)
+      }
+    };
+  }
+
+  function rebuildAllPlaces(basePlaces = state.lunchCachedPlaces) {
+    allPlaces = [
+      ...(Array.isArray(basePlaces) ? basePlaces : []),
+      ...state.lunchCustomPlaces.map((place, index) => normalizeCustomPlace(place, index))
+    ];
   }
 
   function updateCategoryIndicator() {
@@ -3993,6 +4590,7 @@ function initLunchTab(root, { state, persist }) {
   }
 
   function setStatus(text, tone = "default") {
+    if (!els.locationStatus) return;
     els.locationStatus.textContent = text;
     els.locationStatus.dataset.tone = tone;
   }
@@ -4078,6 +4676,7 @@ function initLunchTab(root, { state, persist }) {
   }
 
   function getOpenStreetMapLink(place) {
+    if (place?.custom && place?.mapUrl) return place.mapUrl;
     return `https://www.openstreetmap.org/?mlat=${place.lat}&mlon=${place.lon}#map=18/${place.lat}/${place.lon}`;
   }
 
@@ -4175,13 +4774,13 @@ out center tags;
 
   function restoreCachedPlaces() {
     ensureLunchState();
-    if (!state.lunchCachedPlaces.length) return false;
+    if (!state.lunchCachedPlaces.length && !state.lunchCustomPlaces.length) return false;
 
-    allPlaces = [...state.lunchCachedPlaces];
+    rebuildAllPlaces(state.lunchCachedPlaces);
     setStatus(
       state.lunchLastLocation
         ? `저장된 식당 데이터를 먼저 표시하고 있어요. 마지막 업데이트 ${formatUpdatedAt() || "--:--"}`
-        : "저장된 식당 데이터를 표시하고 있어요.",
+        : state.lunchCustomPlaces.length ? "직접 추가한 식당과 저장된 식당 데이터를 표시하고 있어요." : "저장된 식당 데이터를 표시하고 있어요.",
       "default"
     );
     render();
@@ -4193,6 +4792,7 @@ out center tags;
     state.lunchLastFetchAt = new Date().toISOString();
     state.lunchCachedPlaces = places;
     persist();
+    rebuildAllPlaces(places);
   }
 
   function getFilteredPlaces() {
@@ -4284,6 +4884,83 @@ out center tags;
     els.scheduleModal?.classList.remove("open");
     els.scheduleModal?.setAttribute("aria-hidden", "true");
     if (els.scheduleError) els.scheduleError.textContent = "";
+  }
+
+  function syncPlaceCategoryOptions() {
+    if (!els.placeCategoryInput) return;
+    const options = lunchCategories
+      .filter((category) => category !== CATEGORY_ALL)
+      .map((category) => `<option value="${category}">${category}</option>`)
+      .join("");
+    if (els.placeCategoryInput.innerHTML !== options) {
+      els.placeCategoryInput.innerHTML = options;
+    }
+  }
+
+  function openPlaceModal(placeId = "") {
+    ensureLunchState();
+    syncPlaceCategoryOptions();
+    editingCustomPlaceId = placeId;
+    const place = state.lunchCustomPlaces.find((item) => item.id === placeId) || null;
+    if (els.placeError) els.placeError.textContent = "";
+    if (els.placeNameInput) els.placeNameInput.value = place?.name || "";
+    if (els.placeCategoryInput) els.placeCategoryInput.value = place?.category || CATEGORY_KOREAN;
+    if (els.placeAddressInput) els.placeAddressInput.value = place?.address || "";
+    if (els.placeMapUrlInput) els.placeMapUrlInput.value = place?.mapUrl || "";
+    if (els.placeNoteInput) els.placeNoteInput.value = place?.note || "";
+    if (els.placeDeleteBtn) els.placeDeleteBtn.hidden = !place;
+    els.placeModal?.classList.add("open");
+    els.placeModal?.setAttribute("aria-hidden", "false");
+    requestAnimationFrame(() => els.placeNameInput?.focus());
+  }
+
+  function closePlaceModal() {
+    editingCustomPlaceId = "";
+    els.placeModal?.classList.remove("open");
+    els.placeModal?.setAttribute("aria-hidden", "true");
+    if (els.placeError) els.placeError.textContent = "";
+  }
+
+  function saveCustomPlace() {
+    const name = String(els.placeNameInput?.value || "").trim();
+    const category = els.placeCategoryInput?.value || CATEGORY_KOREAN;
+    const address = String(els.placeAddressInput?.value || "").trim();
+    const mapUrl = normalizeBookmarkUrl(els.placeMapUrlInput?.value || "");
+    const note = String(els.placeNoteInput?.value || "").trim();
+
+    if (!name) {
+      if (els.placeError) els.placeError.textContent = "식당 이름을 입력해 주세요.";
+      return;
+    }
+
+    const nextPlace = {
+      id: editingCustomPlaceId || `custom-place-${Date.now()}-${Math.random().toString(16).slice(2, 6)}`,
+      name,
+      category,
+      address,
+      mapUrl,
+      note
+    };
+
+    if (editingCustomPlaceId) {
+      state.lunchCustomPlaces = state.lunchCustomPlaces.map((item) => item.id === editingCustomPlaceId ? nextPlace : item);
+    } else {
+      state.lunchCustomPlaces = [...state.lunchCustomPlaces, nextPlace];
+    }
+    persist();
+    rebuildAllPlaces(state.lunchCachedPlaces);
+    render();
+    closePlaceModal();
+  }
+
+  function deleteCustomPlace() {
+    if (!editingCustomPlaceId) return;
+    state.lunchCustomPlaces = state.lunchCustomPlaces.filter((item) => item.id !== editingCustomPlaceId);
+    state.lunchFavorites = state.lunchFavorites.filter((id) => id !== editingCustomPlaceId);
+    persist();
+    rebuildAllPlaces(state.lunchCachedPlaces);
+    render();
+    closePlaceModal();
   }
 
   function saveSchedule() {
@@ -4505,6 +5182,7 @@ out center tags;
 
   function render() {
     ensureLunchState();
+    rebuildAllPlaces(state.lunchCachedPlaces);
     const previousPositions = captureItemPositions();
     renderCategoryBar();
     syncLunchScheduleUi();
@@ -4553,23 +5231,30 @@ out center tags;
             <div class="lunch-menu">${place.cuisineLabel}</div>
           </div>
           <div class="lunch-item-actions">
+            ${place.custom ? `<span class="lunch-badge lunch-custom-badge">직접 추가</span>` : ""}
             <span class="lunch-badge">${state.lunchCategory === CATEGORY_ALL ? getPlaceCategoryLabel(place) : state.lunchCategory}</span>
             <button type="button" class="lunch-favorite-btn${isFavorite(place.id) ? " active" : ""}" data-favorite-id="${place.id}" aria-label="즐겨찾기">${getFavoriteIconMarkup(isFavorite(place.id))}</button>
           </div>
         </div>
         <p class="lunch-copy">${place.address}</p>
         <div class="lunch-meta">
-          <span>${formatDistance(place.distanceMeters)}</span>
+          <span>${place.custom ? "직접 추가" : formatDistance(place.distanceMeters)}</span>
           <span>${place.tags.amenity || "eatery"}</span>
         </div>
         <div class="lunch-card-footer">
-          <a class="btn btn-muted lunch-map-btn" href="${getOpenStreetMapLink(place)}" target="_blank" rel="noreferrer">지도보기</a>
+          ${place.custom ? `<button type="button" class="btn btn-muted lunch-edit-btn" data-custom-place-edit="${place.id}">수정</button>` : ""}
+          ${place.custom && !place.mapUrl
+            ? `<button type="button" class="btn btn-muted lunch-map-btn" disabled>지도 없음</button>`
+            : `<a class="btn btn-muted lunch-map-btn" href="${getOpenStreetMapLink(place)}" target="_blank" rel="noreferrer">지도보기</a>`}
         </div>
       </article>
     `).join("");
 
     els.list.querySelectorAll("[data-favorite-id]").forEach((button) => {
       button.addEventListener("click", () => toggleFavorite(button.dataset.favoriteId));
+    });
+    els.list.querySelectorAll("[data-custom-place-edit]").forEach((button) => {
+      button.addEventListener("click", () => openPlaceModal(button.dataset.customPlaceEdit));
     });
     animateListReorder(previousPositions);
     renderPagination(totalCount);
@@ -4688,12 +5373,17 @@ out center tags;
 
   els.locateBtn.addEventListener("click", () => loadNearbyRestaurants(false));
   els.refreshBtn.addEventListener("click", () => loadNearbyRestaurants(true));
+  els.addPlaceBtn?.addEventListener("click", openPlaceModal);
   els.drawBtn?.addEventListener("click", openDrawModal);
   els.scheduleBtn?.addEventListener("click", openScheduleModal);
   els.drawCloseBtn?.addEventListener("click", closeDrawModal);
   els.scheduleCloseBtn?.addEventListener("click", closeScheduleModal);
   els.scheduleCancelBtn?.addEventListener("click", closeScheduleModal);
   els.scheduleSaveBtn?.addEventListener("click", saveSchedule);
+  els.placeCloseBtn?.addEventListener("click", closePlaceModal);
+  els.placeCancelBtn?.addEventListener("click", closePlaceModal);
+  els.placeSaveBtn?.addEventListener("click", saveCustomPlace);
+  els.placeDeleteBtn?.addEventListener("click", deleteCustomPlace);
   els.drawModal?.addEventListener("click", (event) => {
     if (event.target === els.drawModal) {
       closeDrawModal();
@@ -4702,6 +5392,11 @@ out center tags;
   els.scheduleModal?.addEventListener("click", (event) => {
     if (event.target === els.scheduleModal) {
       closeScheduleModal();
+    }
+  });
+  els.placeModal?.addEventListener("click", (event) => {
+    if (event.target === els.placeModal) {
+      closePlaceModal();
     }
   });
   els.drawStartBtn?.addEventListener("click", () => {
@@ -4741,6 +5436,10 @@ out center tags;
     }
     if (event.key === "Escape" && els.scheduleModal?.classList.contains("open")) {
       closeScheduleModal();
+      return;
+    }
+    if (event.key === "Escape" && els.placeModal?.classList.contains("open")) {
+      closePlaceModal();
     }
   });
 
@@ -4755,6 +5454,9 @@ out center tags;
       }
       if (!isActive && els.scheduleModal?.classList.contains("open")) {
         closeScheduleModal();
+      }
+      if (!isActive && els.placeModal?.classList.contains("open")) {
+        closePlaceModal();
       }
       if (isActive && !didAutoLoad) {
         didAutoLoad = true;
@@ -5974,7 +6676,7 @@ async function bootstrap() {
   moveHomeGuideButtonToTabBar();
   initHomeGuide();
   const tabs = await loadTabs(host, tabConfigs, { state, persist });
-  ["todo", "lunch"].forEach((tabId) => {
+  ["tracker", "todo", "lunch"].forEach((tabId) => {
     const tab = tabs.find((entry) => entry.id === tabId);
     if (tab) ensureTabInitialized(tab);
   });
