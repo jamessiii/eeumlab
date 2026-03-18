@@ -95,6 +95,9 @@ const defaultState = {
   lunchEndTime: "",
   lunchLastFetchAt: "",
   lunchLastLocation: null,
+  lunchSavedLocation: null,
+  lunchLocationPresets: [],
+  lunchActiveLocationId: "",
   lunchCachedPlaces: [],
   lunchCustomPlaces: [],
   todoItems: [],
@@ -106,6 +109,8 @@ const defaultState = {
   privacyMode: false,
   privacyPinHash: "",
   privacyModeActivated: false,
+  devGpsDisabled: false,
+  devModeUnlocked: false,
   bookmarks: [],
   bookmarkGroups: [],
   bookmarkViewMode: "card",
@@ -4365,11 +4370,15 @@ const lunchTemplate = `
     </div>
     <div class="lunch-top-side">
       <div class="lunch-actions">
-        <button id="lunchDrawBtn" class="btn btn-primary">오늘 메뉴 뽑기</button>
-        <button id="lunchRefreshBtn" class="btn btn-muted">위치 새로고침</button>
-        <button id="lunchLocateBtn" class="btn btn-primary">현재 위치로 불러오기</button>
+        <button id="lunchDrawBtn" class="btn btn-primary lunch-action-primary">오늘 메뉴 뽑기</button>
+        <button id="lunchRefreshBtn" class="btn btn-muted lunch-action-secondary">다시 조회</button>
+        <button id="lunchSavedLocationBtn" class="btn btn-muted lunch-action-ghost">위치 관리</button>
       </div>
     </div>
+  </div>
+  <div class="lunch-location-toolbar">
+    <button id="lunchCurrentLocationBtn" type="button" class="lunch-source-chip">현재 위치</button>
+    <div id="lunchSavedLocationBar" class="lunch-saved-location-bar"></div>
   </div>
   <div class="lunch-category-row">
     <div class="lunch-category-stack">
@@ -4488,6 +4497,37 @@ const lunchTemplate = `
       </div>
     </div>
   </div>
+
+  <div id="lunchSavedLocationModal" class="lunch-draw-modal" aria-hidden="true">
+    <div class="lunch-draw-panel lunch-schedule-panel">
+      <button id="lunchSavedLocationCloseBtn" type="button" class="btn btn-muted lunch-draw-close" aria-label="회사 위치 설정 닫기">✕</button>
+      <div class="bookmark-modal-kicker">기준 위치</div>
+      <h3 class="lunch-draw-title">저장 위치 관리</h3>
+      <p class="hint">회사, 집, 본가처럼 자주 쓰는 위치를 저장해두고 그 기준으로 식당을 조회할 수 있어요.</p>
+      <div class="lunch-location-manager">
+        <div id="lunchSavedLocationPresetList" class="lunch-saved-location-preset-list"></div>
+        <button id="lunchSavedLocationNewBtn" type="button" class="btn btn-muted">새 위치 추가</button>
+      </div>
+      <div class="todo-form-grid">
+        <label class="field field-span-2">
+          <span>위치 이름</span>
+          <input id="lunchSavedLocationNameInput" type="text" placeholder="예: 판교 오피스 / 강남 사무실" />
+        </label>
+        <label class="field field-span-2">
+          <span>주소</span>
+          <input id="lunchSavedLocationAddressInput" type="text" placeholder="예: 경기도 성남시 분당구 판교역로 166" />
+        </label>
+      </div>
+      <div id="lunchSavedLocationError" class="bookmark-modal-error" aria-live="polite"></div>
+      <div class="button-row">
+        <button id="lunchSavedLocationDeleteBtn" type="button" class="btn btn-stop" hidden>저장 위치 삭제</button>
+        <div class="button-row" style="margin-left:auto;">
+          <button id="lunchSavedLocationCancelBtn" type="button" class="btn btn-muted">취소</button>
+          <button id="lunchSavedLocationSaveBtn" type="button" class="btn btn-primary">저장</button>
+        </div>
+      </div>
+    </div>
+  </div>
 </section>
 `;
 
@@ -4523,7 +4563,9 @@ function initLunchTab(root, { state, persist }) {
     addPlaceBtn: root.querySelector("#lunchAddPlaceBtn"),
     drawBtn: root.querySelector("#lunchDrawBtn"),
     alertBadge: root.querySelector("#lunchAlertBadge"),
-    locateBtn: root.querySelector("#lunchLocateBtn"),
+    currentLocationBtn: root.querySelector("#lunchCurrentLocationBtn"),
+    savedLocationBar: root.querySelector("#lunchSavedLocationBar"),
+    savedLocationBtn: root.querySelector("#lunchSavedLocationBtn"),
     refreshBtn: root.querySelector("#lunchRefreshBtn"),
     favoritesOnlyBtn: root.querySelector("#lunchFavoritesOnlyBtn"),
     scheduleBtn: root.querySelector("#lunchScheduleBtn"),
@@ -4560,7 +4602,17 @@ function initLunchTab(root, { state, persist }) {
     placeAddressInput: root.querySelector("#lunchPlaceAddressInput"),
     placeMapUrlInput: root.querySelector("#lunchPlaceMapUrlInput"),
     placeNoteInput: root.querySelector("#lunchPlaceNoteInput"),
-    placeError: root.querySelector("#lunchPlaceError")
+    placeError: root.querySelector("#lunchPlaceError"),
+    savedLocationModal: root.querySelector("#lunchSavedLocationModal"),
+    savedLocationCloseBtn: root.querySelector("#lunchSavedLocationCloseBtn"),
+    savedLocationCancelBtn: root.querySelector("#lunchSavedLocationCancelBtn"),
+    savedLocationSaveBtn: root.querySelector("#lunchSavedLocationSaveBtn"),
+    savedLocationDeleteBtn: root.querySelector("#lunchSavedLocationDeleteBtn"),
+    savedLocationPresetList: root.querySelector("#lunchSavedLocationPresetList"),
+    savedLocationNewBtn: root.querySelector("#lunchSavedLocationNewBtn"),
+    savedLocationNameInput: root.querySelector("#lunchSavedLocationNameInput"),
+    savedLocationAddressInput: root.querySelector("#lunchSavedLocationAddressInput"),
+    savedLocationError: root.querySelector("#lunchSavedLocationError")
   };
 
   let isFetching = false;
@@ -4572,6 +4624,7 @@ function initLunchTab(root, { state, persist }) {
   let selectedDrawPlaceId = "";
   let tabAlertTimer = null;
   let editingCustomPlaceId = "";
+  let editingSavedLocationId = "";
 
   if (els.drawModal && els.drawModal.parentElement !== document.body) {
     document.body.appendChild(els.drawModal);
@@ -4581,6 +4634,9 @@ function initLunchTab(root, { state, persist }) {
   }
   if (els.placeModal && els.placeModal.parentElement !== document.body) {
     document.body.appendChild(els.placeModal);
+  }
+  if (els.savedLocationModal && els.savedLocationModal.parentElement !== document.body) {
+    document.body.appendChild(els.savedLocationModal);
   }
 
   function getFavoriteIconMarkup(active) {
@@ -4629,6 +4685,44 @@ function initLunchTab(root, { state, persist }) {
     state.lunchEndTime = /^\d{2}:\d{2}$/.test(state.lunchEndTime || "") ? state.lunchEndTime : "";
     state.lunchCachedPlaces = Array.isArray(state.lunchCachedPlaces) ? state.lunchCachedPlaces : [];
     state.lunchLastLocation = state.lunchLastLocation && typeof state.lunchLastLocation === "object" ? state.lunchLastLocation : null;
+    state.lunchSavedLocation = state.lunchSavedLocation && typeof state.lunchSavedLocation === "object"
+      && Number.isFinite(Number(state.lunchSavedLocation.lat))
+      && Number.isFinite(Number(state.lunchSavedLocation.lon))
+      ? {
+        name: String(state.lunchSavedLocation.name || "").trim(),
+        address: String(state.lunchSavedLocation.address || "").trim(),
+        lat: Number(state.lunchSavedLocation.lat),
+        lon: Number(state.lunchSavedLocation.lon)
+      }
+      : null;
+    state.lunchLocationPresets = Array.isArray(state.lunchLocationPresets)
+      ? state.lunchLocationPresets
+        .map((item) => item && typeof item === "object"
+          && Number.isFinite(Number(item.lat))
+          && Number.isFinite(Number(item.lon))
+          ? {
+            id: String(item.id || `lunch-location-${Date.now()}-${Math.random().toString(16).slice(2, 6)}`),
+            name: String(item.name || "").trim(),
+            address: String(item.address || "").trim(),
+            lat: Number(item.lat),
+            lon: Number(item.lon)
+          }
+          : null)
+        .filter((item) => item?.name)
+      : [];
+    if (!state.lunchLocationPresets.length && state.lunchSavedLocation) {
+      state.lunchLocationPresets = [{
+        id: `lunch-location-${Date.now()}`,
+        name: state.lunchSavedLocation.name,
+        address: state.lunchSavedLocation.address,
+        lat: state.lunchSavedLocation.lat,
+        lon: state.lunchSavedLocation.lon
+      }];
+    }
+    state.lunchActiveLocationId = String(state.lunchActiveLocationId || "");
+    if (state.lunchActiveLocationId && !state.lunchLocationPresets.some((item) => item.id === state.lunchActiveLocationId)) {
+      state.lunchActiveLocationId = "";
+    }
     state.lunchLastFetchAt = state.lunchLastFetchAt || "";
     state.lunchCustomPlaces = Array.isArray(state.lunchCustomPlaces) ? state.lunchCustomPlaces.map((item) => ({
       id: String(item?.id || `custom-${Date.now()}`),
@@ -4693,6 +4787,38 @@ function initLunchTab(root, { state, persist }) {
     if (!els.locationStatus) return;
     els.locationStatus.textContent = text;
     els.locationStatus.dataset.tone = tone;
+  }
+
+  function getLocationPresets() {
+    ensureLunchState();
+    return state.lunchLocationPresets;
+  }
+
+  function getActiveLocationPreset() {
+    return getLocationPresets().find((item) => item.id === state.lunchActiveLocationId) || null;
+  }
+
+  function getSavedLocationLabel() {
+    return getActiveLocationPreset()?.name || getLocationPresets()[0]?.name || "저장 위치";
+  }
+
+  function getFallbackLocation() {
+    const activePreset = getActiveLocationPreset();
+    if (activePreset) {
+      return {
+        label: getSavedLocationLabel(),
+        lat: activePreset.lat,
+        lon: activePreset.lon
+      };
+    }
+    if (state.lunchLastLocation && Number.isFinite(Number(state.lunchLastLocation.lat)) && Number.isFinite(Number(state.lunchLastLocation.lon))) {
+      return {
+        label: "마지막 위치",
+        lat: Number(state.lunchLastLocation.lat),
+        lon: Number(state.lunchLastLocation.lon)
+      };
+    }
+    return null;
   }
 
   function normalizeCuisine(tags) {
@@ -4934,6 +5060,167 @@ out center tags;
     if (els.scheduleEndInput && els.scheduleEndInput.value !== state.lunchEndTime) {
       els.scheduleEndInput.value = state.lunchEndTime;
     }
+  }
+
+  function syncSavedLocationUi() {
+    const presets = getLocationPresets();
+    const activePreset = getActiveLocationPreset();
+    if (els.currentLocationBtn) {
+      const useCurrent = !activePreset;
+      els.currentLocationBtn.classList.toggle("active", useCurrent);
+      els.currentLocationBtn.setAttribute("aria-pressed", useCurrent ? "true" : "false");
+    }
+    if (els.savedLocationBar) {
+      els.savedLocationBar.innerHTML = presets.map((item) => `
+        <button type="button" class="lunch-source-chip${item.id === state.lunchActiveLocationId ? " active" : ""}" data-location-preset-id="${item.id}" title="${escapeHtml(item.address || item.name)}">${escapeHtml(item.name)}</button>
+      `).join("");
+      els.savedLocationBar.querySelectorAll("[data-location-preset-id]").forEach((button) => {
+        button.addEventListener("click", () => {
+          state.lunchActiveLocationId = button.dataset.locationPresetId;
+          persist();
+          syncSavedLocationUi();
+          loadSavedLocationRestaurants(false, button.dataset.locationPresetId);
+        });
+      });
+    }
+    if (els.savedLocationBtn) {
+      els.savedLocationBtn.textContent = "위치 관리";
+      els.savedLocationBtn.title = presets.length ? "저장된 위치를 관리해요." : "집, 회사, 본가 같은 위치를 저장해요.";
+    }
+    if (els.savedLocationDeleteBtn) {
+      els.savedLocationDeleteBtn.hidden = !editingSavedLocationId;
+    }
+    if (els.refreshBtn) {
+      const activeLabel = activePreset ? activePreset.name : "현재 위치";
+      els.refreshBtn.title = `${activeLabel} 기준으로 식당을 다시 조회해요.`;
+    }
+  }
+
+  function openSavedLocationModal() {
+    ensureLunchState();
+    editingSavedLocationId = state.lunchActiveLocationId || getLocationPresets()[0]?.id || "";
+    renderSavedLocationPresetList();
+    els.savedLocationError.textContent = "";
+    syncSavedLocationUi();
+    els.savedLocationModal.classList.add("open");
+    els.savedLocationModal.setAttribute("aria-hidden", "false");
+    requestAnimationFrame(() => els.savedLocationNameInput.focus());
+  }
+
+  function closeSavedLocationModal() {
+    editingSavedLocationId = "";
+    els.savedLocationModal.classList.remove("open");
+    els.savedLocationModal.setAttribute("aria-hidden", "true");
+    els.savedLocationError.textContent = "";
+  }
+
+  function renderSavedLocationPresetList() {
+    const presets = getLocationPresets();
+    const editingPreset = presets.find((item) => item.id === editingSavedLocationId) || null;
+
+    if (els.savedLocationPresetList) {
+      els.savedLocationPresetList.innerHTML = presets.map((item) => `
+        <button type="button" class="lunch-location-manage-chip${item.id === editingSavedLocationId ? " active" : ""}" data-location-manage-id="${item.id}">
+          ${escapeHtml(item.name)}
+        </button>
+      `).join("");
+      els.savedLocationPresetList.querySelectorAll("[data-location-manage-id]").forEach((button) => {
+        button.addEventListener("click", () => {
+          editingSavedLocationId = button.dataset.locationManageId;
+          renderSavedLocationPresetList();
+        });
+      });
+    }
+
+    if (els.savedLocationNameInput) {
+      els.savedLocationNameInput.value = editingPreset?.name || "";
+    }
+    if (els.savedLocationAddressInput) {
+      els.savedLocationAddressInput.value = editingPreset?.address || "";
+    }
+    if (els.savedLocationDeleteBtn) {
+      els.savedLocationDeleteBtn.hidden = !editingPreset;
+    }
+  }
+
+  async function geocodeSavedLocationAddress(address) {
+    const response = await fetch(`https://nominatim.openstreetmap.org/search?format=jsonv2&limit=1&accept-language=ko&q=${encodeURIComponent(address)}`);
+    if (!response.ok) {
+      throw new Error("saved-location-geocode-failed");
+    }
+    const results = await response.json();
+    if (!Array.isArray(results) || !results.length) {
+      throw new Error("saved-location-geocode-empty");
+    }
+    const first = results[0];
+    const lat = Number(first.lat);
+    const lon = Number(first.lon);
+    if (!Number.isFinite(lat) || !Number.isFinite(lon)) {
+      throw new Error("saved-location-geocode-invalid");
+    }
+    return {
+      lat,
+      lon,
+      address: String(first.display_name || address).trim()
+    };
+  }
+
+  async function saveSavedLocation() {
+    const name = els.savedLocationNameInput.value.trim();
+    const address = els.savedLocationAddressInput.value.trim();
+    if (!name) {
+      els.savedLocationError.textContent = "위치 이름을 입력해 주세요.";
+      return;
+    }
+    if (!address) {
+      els.savedLocationError.textContent = "주소를 입력해 주세요.";
+      return;
+    }
+    els.savedLocationError.textContent = "";
+    if (els.savedLocationSaveBtn) els.savedLocationSaveBtn.disabled = true;
+    try {
+      const resolved = await geocodeSavedLocationAddress(address);
+      const nextPreset = {
+        id: editingSavedLocationId || `lunch-location-${Date.now()}-${Math.random().toString(16).slice(2, 6)}`,
+        name,
+        address: resolved.address,
+        lat: resolved.lat,
+        lon: resolved.lon
+      };
+      if (editingSavedLocationId) {
+        state.lunchLocationPresets = getLocationPresets().map((item) => item.id === editingSavedLocationId ? nextPreset : item);
+      } else {
+        state.lunchLocationPresets = [...getLocationPresets(), nextPreset];
+      }
+      state.lunchSavedLocation = nextPreset;
+      state.lunchActiveLocationId = nextPreset.id;
+      persist();
+      syncSavedLocationUi();
+      setStatus(`${name} 위치를 저장했어요. 필요할 때 이 위치 기준으로 식당을 조회할 수 있어요.`, "success");
+      closeSavedLocationModal();
+      render();
+    } catch (error) {
+      console.error(error);
+      els.savedLocationError.textContent = "주소로 위치를 찾지 못했어요. 회사 주소를 조금 더 정확하게 입력해 주세요.";
+    } finally {
+      if (els.savedLocationSaveBtn) els.savedLocationSaveBtn.disabled = false;
+    }
+  }
+
+  function deleteSavedLocation() {
+    if (!editingSavedLocationId) return;
+    const target = getLocationPresets().find((item) => item.id === editingSavedLocationId);
+    if (!target) return;
+    state.lunchLocationPresets = getLocationPresets().filter((item) => item.id !== editingSavedLocationId);
+    if (state.lunchActiveLocationId === editingSavedLocationId) {
+      state.lunchActiveLocationId = "";
+    }
+    state.lunchSavedLocation = getLocationPresets()[0] || null;
+    persist();
+    syncSavedLocationUi();
+    setStatus(`${target.name} 저장 위치를 삭제했어요.`, "default");
+    closeSavedLocationModal();
+    render();
   }
 
   function getLunchAlertState() {
@@ -5286,6 +5573,7 @@ out center tags;
     const previousPositions = captureItemPositions();
     renderCategoryBar();
     syncLunchScheduleUi();
+    syncSavedLocationUi();
     updateLunchTabAlert();
 
     if (els.searchInput.value !== state.lunchSearchQuery) {
@@ -5408,6 +5696,10 @@ out center tags;
 
   function requestCurrentPosition() {
     return new Promise((resolve, reject) => {
+      if (state.devGpsDisabled) {
+        reject(new Error("gps-disabled-mode"));
+        return;
+      }
       if (!navigator.geolocation) {
         reject(new Error("geolocation-unavailable"));
         return;
@@ -5421,42 +5713,173 @@ out center tags;
     });
   }
 
-  async function loadNearbyRestaurants(forceRefresh = false) {
-    if (isFetching) return;
+  async function loadRestaurantsFromCoords(lat, lon, options = {}) {
+    const {
+      resetSearch = false,
+      loadingText = "기준 위치로 근처 식당을 조회하는 중이에요.",
+      successText = `기준 위치 반경 ${Math.round(SEARCH_RADIUS_METERS / 100) / 10}km 식당 데이터를 조회했어요.`,
+      errorText = "기준 위치 식당 데이터를 불러오지 못했어요. 잠시 후 다시 시도해 주세요."
+    } = options;
+    const toastKey = "lunch-location-load";
 
-    isFetching = true;
-    els.locateBtn.disabled = true;
-    els.refreshBtn.disabled = true;
-
-    if (forceRefresh) {
+    if (resetSearch) {
       state.lunchSearchQuery = "";
     }
 
-    setStatus(
-      forceRefresh
-        ? "현재 위치를 다시 확인하고 식당 데이터를 새로 가져오는 중이에요."
-        : "현재 위치를 확인하고 근처 식당을 불러오는 중이에요.",
-      "loading"
-    );
+    setStatus(loadingText, "loading");
+    showGlobalToast(loadingText, "loading", 0, { key: toastKey });
+    let places;
+    try {
+      places = await fetchNearbyPlaces(lat, lon);
+    } catch (error) {
+      dismissGlobalToast(toastKey);
+      throw error;
+    }
+    allPlaces = places;
+    rememberPlaces(lat, lon, places);
+    activePage = 1;
+    setStatus(successText, "success");
+    showGlobalToast(successText, "success", 2200, { key: toastKey });
+    render();
+    return places;
+  }
+
+  async function loadSavedLocationRestaurants(forceRefresh = false, presetId = state.lunchActiveLocationId) {
+    ensureLunchState();
+    const targetPreset = getLocationPresets().find((item) => item.id === presetId) || null;
+    if (!targetPreset) {
+      setStatus("먼저 위치를 저장해 주세요.", "error");
+      showGlobalToast("먼저 위치를 저장해 주세요.", "error");
+      openSavedLocationModal();
+      return;
+    }
+    state.lunchActiveLocationId = targetPreset.id;
+    state.lunchSavedLocation = targetPreset;
+    persist();
+
+    if (isFetching) return;
+    isFetching = true;
+    if (els.currentLocationBtn) els.currentLocationBtn.disabled = true;
+    els.refreshBtn.disabled = true;
+    if (els.savedLocationBtn) els.savedLocationBtn.disabled = true;
 
     try {
-      const position = await requestCurrentPosition();
-      const { latitude, longitude } = position.coords;
-
-      allPlaces = await fetchNearbyPlaces(latitude, longitude);
-      rememberPlaces(latitude, longitude, allPlaces);
-      activePage = 1;
-      setStatus(`현재 위치 기준 반경 ${Math.round(SEARCH_RADIUS_METERS / 100) / 10}km 식당 데이터를 불러왔어요.`, "success");
-      render();
+      await loadRestaurantsFromCoords(targetPreset.lat, targetPreset.lon, {
+        resetSearch: forceRefresh,
+        loadingText: `${targetPreset.name} 기준으로 식당 데이터를 조회하는 중이에요.`,
+        successText: `${targetPreset.name} 근처 식당 데이터를 조회했어요.`
+      });
     } catch (error) {
       console.error(error);
-
-      if (restoreCachedPlaces()) {
-        setStatus("실시간 위치 갱신은 실패했지만, 저장해 둔 식당 데이터를 표시했어요.", "error");
-      } else if (error?.code === 1) {
-        setStatus("위치 권한이 거부되어 근처 식당을 불러올 수 없어요.", "error");
+      if (!forceRefresh && restoreCachedPlaces()) {
+        setStatus(`${targetPreset.name} 위치 갱신은 실패했지만, 저장된 식당 데이터를 표시했어요.`, "error");
+        showGlobalToast(`${targetPreset.name} 위치 갱신은 실패했지만, 저장된 식당 데이터를 표시했어요.`, "error");
       } else {
-        setStatus("근처 식당 데이터를 불러오지 못했어요. 잠시 후 다시 시도해 주세요.", "error");
+        const message = forceRefresh
+          ? `${targetPreset.name} 기준으로 새 식당 데이터를 조회하지 못했어요.`
+          : "저장된 위치 기준 식당 데이터를 불러오지 못했어요.";
+        setStatus(message, "error");
+        showGlobalToast(message, "error");
+      }
+    } finally {
+      isFetching = false;
+      if (els.currentLocationBtn) els.currentLocationBtn.disabled = false;
+      els.refreshBtn.disabled = false;
+      syncSavedLocationUi();
+    }
+  }
+
+  async function loadNearbyRestaurants(options = {}) {
+    const {
+      forceRefresh = false,
+      allowSavedFallback = false
+    } = typeof options === "boolean" ? { forceRefresh: options, allowSavedFallback: false } : options;
+    if (isFetching) return;
+
+    const fallbackLocation = getFallbackLocation();
+    if (state.devGpsDisabled && fallbackLocation && allowSavedFallback) {
+      if (fallbackLocation.label === getSavedLocationLabel()) {
+        await loadSavedLocationRestaurants(forceRefresh);
+      } else {
+        await loadRestaurantsFromCoords(fallbackLocation.lat, fallbackLocation.lon, {
+          resetSearch: forceRefresh,
+          loadingText: `${fallbackLocation.label} 기준으로 식당 데이터를 다시 조회하는 중이에요.`,
+          successText: `${fallbackLocation.label} 기준 식당 데이터를 새로 조회했어요.`
+        });
+      }
+      return;
+    }
+
+    isFetching = true;
+    if (els.currentLocationBtn) els.currentLocationBtn.disabled = true;
+    els.refreshBtn.disabled = true;
+    if (els.savedLocationBtn) els.savedLocationBtn.disabled = true;
+
+    try {
+      state.lunchActiveLocationId = "";
+      persist();
+      const position = await requestCurrentPosition();
+      const { latitude, longitude } = position.coords;
+      await loadRestaurantsFromCoords(latitude, longitude, {
+        resetSearch: forceRefresh,
+        loadingText: forceRefresh
+          ? "현재 위치를 다시 확인하고 식당 데이터를 새로 조회하는 중이에요."
+          : "현재 위치를 확인하고 근처 식당을 조회하는 중이에요.",
+        successText: `현재 위치 기준 반경 ${Math.round(SEARCH_RADIUS_METERS / 100) / 10}km 식당 데이터를 조회했어요.`
+      });
+    } catch (error) {
+      console.error(error);
+      const isGpsDisabledMode = error?.message === "gps-disabled-mode";
+      const nextFallbackLocation = getFallbackLocation();
+      if (nextFallbackLocation && allowSavedFallback) {
+        try {
+          await loadRestaurantsFromCoords(nextFallbackLocation.lat, nextFallbackLocation.lon, {
+            resetSearch: forceRefresh,
+            loadingText: `${nextFallbackLocation.label} 기준으로 식당 데이터를 조회하는 중이에요.`,
+            successText: `현재 위치 대신 ${nextFallbackLocation.label} 기준 식당 데이터를 조회했어요.`
+          });
+          return;
+        } catch (savedLocationError) {
+          console.error(savedLocationError);
+        }
+      }
+
+      if (!forceRefresh && isGpsDisabledMode && restoreCachedPlaces()) {
+        setStatus("현재 위치를 확인하지 못해 저장된 식당 데이터를 표시하고 있어요.", "error");
+        showGlobalToast("현재 위치를 확인하지 못해 저장된 식당 데이터를 표시하고 있어요.", "error");
+      } else if (!forceRefresh && restoreCachedPlaces()) {
+        setStatus("실시간 위치 갱신은 실패했지만, 저장해 둔 식당 데이터를 표시했어요.", "error");
+        showGlobalToast("실시간 위치 갱신은 실패했지만, 저장해 둔 식당 데이터를 표시했어요.", "error");
+      } else if (isGpsDisabledMode) {
+        const message = forceRefresh
+          ? state.lunchSavedLocation && !allowSavedFallback
+            ? "현재 위치를 새로 확인하지 못했어요. 회사 위치 조회를 사용해 주세요."
+            : "현재 위치를 확인하지 못해 새 식당 정보를 불러올 수 없어요."
+          : state.lunchSavedLocation && !allowSavedFallback
+            ? "현재 위치를 조회하지 못했어요. 필요하면 회사 위치 조회를 사용해 주세요."
+            : "현재 위치를 불러올 수 없어요.";
+        setStatus(message, "error");
+        showGlobalToast(message, "error");
+      } else if (error?.code === 1) {
+        const message = forceRefresh
+          ? state.lunchSavedLocation && !allowSavedFallback
+            ? "위치 권한이 없어 현재 위치를 새로 확인하지 못했어요. 회사 위치 조회를 사용해 주세요."
+            : "위치 권한이 없어 새 식당 데이터를 불러오지 못했어요."
+          : state.lunchSavedLocation && !allowSavedFallback
+            ? "위치 권한이 없어 현재 위치를 조회하지 못했어요. 회사 위치 조회를 사용해 주세요."
+            : "위치 권한이 거부되어 근처 식당을 불러올 수 없어요.";
+        setStatus(message, "error");
+        showGlobalToast(message, "error");
+      } else {
+        const message = forceRefresh
+          ? state.lunchSavedLocation
+            ? "현재 위치와 저장된 위치 기준 새 식당 데이터를 모두 불러오지 못했어요. 잠시 후 다시 시도해 주세요."
+            : "새 식당 데이터를 불러오지 못했어요. 잠시 후 다시 시도해 주세요."
+          : state.lunchSavedLocation
+            ? "현재 위치와 저장된 위치 모두 불러오지 못했어요. 잠시 후 다시 시도해 주세요."
+            : "근처 식당 데이터를 불러오지 못했어요. 잠시 후 다시 시도해 주세요.";
+        setStatus(message, "error");
+        showGlobalToast(message, "error");
       }
 
       if (!allPlaces.length) {
@@ -5466,13 +5889,26 @@ out center tags;
       }
     } finally {
       isFetching = false;
-      els.locateBtn.disabled = false;
+      if (els.currentLocationBtn) els.currentLocationBtn.disabled = false;
       els.refreshBtn.disabled = false;
+      syncSavedLocationUi();
     }
   }
 
-  els.locateBtn.addEventListener("click", () => loadNearbyRestaurants(false));
-  els.refreshBtn.addEventListener("click", () => loadNearbyRestaurants(true));
+  els.currentLocationBtn?.addEventListener("click", () => loadNearbyRestaurants({ forceRefresh: false, allowSavedFallback: false }));
+  els.refreshBtn.addEventListener("click", () => {
+    if (state.lunchActiveLocationId) {
+      loadSavedLocationRestaurants(true, state.lunchActiveLocationId);
+      return;
+    }
+    loadNearbyRestaurants({ forceRefresh: true, allowSavedFallback: false });
+  });
+  els.savedLocationBtn?.addEventListener("click", openSavedLocationModal);
+  els.savedLocationNewBtn?.addEventListener("click", () => {
+    editingSavedLocationId = "";
+    renderSavedLocationPresetList();
+    els.savedLocationNameInput?.focus();
+  });
   els.addPlaceBtn?.addEventListener("click", openPlaceModal);
   els.drawBtn?.addEventListener("click", openDrawModal);
   els.scheduleBtn?.addEventListener("click", openScheduleModal);
@@ -5484,9 +5920,19 @@ out center tags;
   els.placeCancelBtn?.addEventListener("click", closePlaceModal);
   els.placeSaveBtn?.addEventListener("click", saveCustomPlace);
   els.placeDeleteBtn?.addEventListener("click", deleteCustomPlace);
+  els.savedLocationCloseBtn?.addEventListener("click", closeSavedLocationModal);
+  els.savedLocationCancelBtn?.addEventListener("click", closeSavedLocationModal);
+  els.savedLocationSaveBtn?.addEventListener("click", saveSavedLocation);
+  els.savedLocationDeleteBtn?.addEventListener("click", deleteSavedLocation);
+  window.addEventListener("developer-state-change", render);
   els.drawModal?.addEventListener("click", (event) => {
     if (event.target === els.drawModal) {
       closeDrawModal();
+    }
+  });
+  els.savedLocationModal?.addEventListener("click", (event) => {
+    if (event.target === els.savedLocationModal) {
+      closeSavedLocationModal();
     }
   });
   els.scheduleModal?.addEventListener("click", (event) => {
@@ -5561,7 +6007,11 @@ out center tags;
       if (isActive && !didAutoLoad) {
         didAutoLoad = true;
         if (!allPlaces.length) {
-          loadNearbyRestaurants(false);
+          if (state.lunchActiveLocationId) {
+            loadSavedLocationRestaurants(false, state.lunchActiveLocationId);
+          } else {
+            loadNearbyRestaurants({ forceRefresh: false, allowSavedFallback: true });
+          }
         }
       }
     },
@@ -5570,6 +6020,7 @@ out center tags;
       root.querySelector(".lunch-card")?.scrollIntoView({ behavior: "smooth", block: "start" });
     },
     destroy() {
+      window.removeEventListener("developer-state-change", render);
       if (tabAlertTimer) clearInterval(tabAlertTimer);
       setTabAlert("lunch", "lunch", false);
       setGlobalLunchAlert(false);
@@ -6502,6 +6953,7 @@ function initHeroZodiacMark() {
   heroMark.textContent = zodiacMarks[index];
   heroMark.setAttribute("title", `${year}년 ${zodiacLabels[index]}`);
   heroMark.setAttribute("aria-label", `${year}년 ${zodiacLabels[index]}`);
+  heroMark.setAttribute("draggable", "true");
 }
 
 function buildWeatherIcon(condition = "sunny") {
@@ -6604,12 +7056,24 @@ async function initWeatherWidget() {
   };
 
   const loadWeather = async (forceRefresh = false) => {
+    const toastKey = "weather-load";
     if (!forceRefresh && renderFromCache()) {
       return;
     }
 
+    if (state.devGpsDisabled) {
+      dismissGlobalToast(toastKey);
+      if (!renderFromCache()) {
+        setWeatherState("위치 정보 없이 날씨 표시 불가", "--°", "cloud");
+        showGlobalToast("위치 정보가 없어 날씨를 조회할 수 없어요.", "error");
+      }
+      return;
+    }
+
     if (!navigator.geolocation) {
+      dismissGlobalToast(toastKey);
       setWeatherState("위치 허용 시 날씨 표시", "--°", "cloud");
+      showGlobalToast("이 브라우저에서는 위치 기반 날씨 조회를 사용할 수 없어요.", "error");
       return;
     }
 
@@ -6618,6 +7082,7 @@ async function initWeatherWidget() {
       if (forceRefresh) {
         setWeatherState("날씨 새로고침 중...", tempEl.textContent, "cloud");
       }
+      showGlobalToast(forceRefresh ? "날씨를 다시 조회하는 중이에요." : "날씨를 조회하는 중이에요.", "loading", 0, { key: toastKey });
 
       const position = await new Promise((resolve, reject) => {
         navigator.geolocation.getCurrentPosition(resolve, reject, {
@@ -6653,17 +7118,23 @@ async function initWeatherWidget() {
       state.weatherCache = nextCache;
       persist();
       setWeatherState(nextCache.summary, nextCache.temperature, nextCache.icon, nextCache.updatedAt);
+      showGlobalToast("날씨 정보를 업데이트했어요.", "success", 2200, { key: toastKey });
     } catch (error) {
       console.error(error);
+      dismissGlobalToast(toastKey);
       if (!renderFromCache()) {
         setWeatherState("날씨 불러오기 실패", "--°", "cloud");
       }
+      showGlobalToast("날씨 정보를 조회하지 못했어요.", "error");
     } finally {
       setRefreshState(false);
     }
   };
 
   refreshBtn.addEventListener("click", () => loadWeather(true));
+  window.addEventListener("developer-state-change", () => {
+    loadWeather(true);
+  });
 
   if (!renderFromCache()) {
     await loadWeather(true);
@@ -6769,6 +7240,74 @@ function initHomeGuide() {
   });
 }
 
+function ensureGlobalToast() {
+  let toast = document.getElementById("globalToast");
+  if (toast) return toast;
+
+  toast = document.createElement("div");
+  toast.id = "globalToast";
+  toast.className = "global-toast-stack";
+  toast.setAttribute("aria-live", "polite");
+  toast.setAttribute("aria-atomic", "false");
+  document.body.appendChild(toast);
+  return toast;
+}
+
+function dismissGlobalToast(key) {
+  if (!key) return;
+  const stack = document.getElementById("globalToast");
+  if (!stack) return;
+  stack.querySelectorAll(`.global-toast[data-key="${key}"]`).forEach((toast) => {
+    toast.classList.remove("show");
+    toast.classList.add("hide");
+    window.setTimeout(() => {
+      toast.remove();
+      if (!stack.childElementCount) {
+        stack.classList.remove("has-items");
+      }
+    }, 220);
+  });
+}
+
+function showGlobalToast(message, tone = "default", duration = 2200, options = {}) {
+  const stack = ensureGlobalToast();
+  const key = typeof options === "string" ? options : options?.key;
+  if (key) {
+    dismissGlobalToast(key);
+  }
+  const toast = document.createElement("div");
+  toast.className = "global-toast";
+  toast.dataset.tone = tone;
+  if (key) {
+    toast.dataset.key = key;
+  }
+  toast.textContent = message;
+  stack.prepend(toast);
+
+  requestAnimationFrame(() => {
+    toast.classList.add("show");
+  });
+
+  const removeToast = () => {
+    toast.classList.remove("show");
+    toast.classList.add("hide");
+    window.setTimeout(() => {
+      toast.remove();
+      if (!stack.childElementCount) {
+        stack.classList.remove("has-items");
+      }
+    }, 220);
+  };
+
+  stack.classList.add("has-items");
+
+  if (duration > 0) {
+    window.setTimeout(removeToast, duration);
+  }
+
+  toast.addEventListener("click", removeToast, { once: true });
+}
+
 async function hashPrivacyPin(pin) {
   const normalized = String(pin || "").trim();
   if (!normalized) return "";
@@ -6780,6 +7319,25 @@ async function hashPrivacyPin(pin) {
 function initPrivacyControls(state, persist) {
   const wrapper = document.createElement("div");
   wrapper.innerHTML = `
+    <div id="developerFab" class="developer-fab">
+      <div id="developerFabMenu" class="developer-fab-menu" aria-hidden="true">
+        <button id="developerGpsBtn" type="button" class="privacy-fab-action" title="GPS 비활성 모드">
+          <span class="privacy-fab-action-label">GPS 비활성</span>
+        </button>
+        <button id="developerDeleteLocationBtn" type="button" class="privacy-fab-action" title="위치정보 삭제">
+          <span class="privacy-fab-action-label">위치정보 삭제</span>
+        </button>
+        <button id="developerDeleteLunchDataBtn" type="button" class="privacy-fab-action" title="식당정보 삭제">
+          <span class="privacy-fab-action-label">식당정보 삭제</span>
+        </button>
+        <button id="developerCloseBtn" type="button" class="privacy-fab-action" title="개발자 모드 종료">
+          <span class="privacy-fab-action-label">개발자모드 종료</span>
+        </button>
+      </div>
+      <button id="developerFabBtn" type="button" class="developer-fab-btn" aria-expanded="false" aria-controls="developerFabMenu" title="개발자 모드">
+        <span class="developer-fab-label">DEV</span>
+      </button>
+    </div>
     <div id="privacyFab" class="privacy-fab">
       <div id="privacyHint" class="privacy-hint" role="status">프라이버시 모드를 설정하세요!</div>
       <div id="privacyFabMenu" class="privacy-fab-menu" aria-hidden="true">
@@ -6860,6 +7418,13 @@ function initPrivacyControls(state, persist) {
   document.body.append(...wrapper.children);
 
   const els = {
+    developerFab: document.getElementById("developerFab"),
+    developerFabBtn: document.getElementById("developerFabBtn"),
+    developerFabMenu: document.getElementById("developerFabMenu"),
+    developerGpsBtn: document.getElementById("developerGpsBtn"),
+    developerDeleteLocationBtn: document.getElementById("developerDeleteLocationBtn"),
+    developerDeleteLunchDataBtn: document.getElementById("developerDeleteLunchDataBtn"),
+    developerCloseBtn: document.getElementById("developerCloseBtn"),
     fab: document.getElementById("privacyFab"),
     fabBtn: document.getElementById("privacyFabBtn"),
     fabIcon: document.getElementById("privacyFabIcon"),
@@ -6884,7 +7449,29 @@ function initPrivacyControls(state, persist) {
   let isLocked = false;
   let isPeeking = false;
   let isMenuOpen = false;
+  let isDeveloperMenuOpen = false;
   let isPeekShortcutHeld = false;
+  let isDevModeVisible = Boolean(state.devModeUnlocked);
+  let isDraggingDevUnlock = false;
+  function emitDeveloperStateChange() {
+    window.dispatchEvent(new CustomEvent("developer-state-change"));
+  }
+
+  function deleteDeveloperLocations() {
+    state.lunchSavedLocation = null;
+    state.lunchLocationPresets = [];
+    state.lunchActiveLocationId = "";
+    state.lunchLastLocation = null;
+    persist();
+    emitDeveloperStateChange();
+  }
+
+  function deleteDeveloperLunchData() {
+    state.lunchCachedPlaces = [];
+    state.lunchLastFetchAt = "";
+    persist();
+    emitDeveloperStateChange();
+  }
 
   function markPrivacyActivated() {
     if (state.privacyModeActivated) return;
@@ -6895,8 +7482,16 @@ function initPrivacyControls(state, persist) {
   function setMenuOpen(nextOpen) {
     isMenuOpen = Boolean(nextOpen);
     els.fab?.classList.toggle("open", isMenuOpen);
+    els.developerFab?.classList.toggle("shifted", isMenuOpen);
     els.fabBtn?.setAttribute("aria-expanded", String(isMenuOpen));
     els.fabMenu?.setAttribute("aria-hidden", String(!isMenuOpen));
+  }
+
+  function setDeveloperMenuOpen(nextOpen) {
+    isDeveloperMenuOpen = Boolean(nextOpen);
+    els.developerFab?.classList.toggle("open", isDeveloperMenuOpen);
+    els.developerFabBtn?.setAttribute("aria-expanded", String(isDeveloperMenuOpen));
+    els.developerFabMenu?.setAttribute("aria-hidden", String(!isDeveloperMenuOpen));
   }
 
   function applyPrivacyState() {
@@ -6911,6 +7506,9 @@ function initPrivacyControls(state, persist) {
     els.fabIcon.classList.toggle("locked", Boolean(state.privacyMode));
     els.fabIcon.classList.toggle("unlocked", !state.privacyMode);
     els.fabBtn.title = state.privacyMode ? "프라이버시 메뉴 열기 (잠김)" : "프라이버시 메뉴 열기 (열림)";
+    els.developerGpsBtn?.classList.toggle("active", Boolean(state.devGpsDisabled));
+    els.developerGpsBtn?.setAttribute("aria-pressed", state.devGpsDisabled ? "true" : "false");
+    els.developerFab?.classList.toggle("hidden", !isDevModeVisible);
     els.lockOverlay.classList.toggle("open", Boolean(isLocked));
     els.lockOverlay.setAttribute("aria-hidden", String(!isLocked));
     if (state.privacyMode && !state.privacyModeActivated) {
@@ -6974,7 +7572,35 @@ function initPrivacyControls(state, persist) {
   });
 
   els.fabBtn.addEventListener("click", () => {
+    setDeveloperMenuOpen(false);
     setMenuOpen(!isMenuOpen);
+  });
+  els.developerFabBtn?.addEventListener("click", () => {
+    setMenuOpen(false);
+    setDeveloperMenuOpen(!isDeveloperMenuOpen);
+  });
+  els.developerGpsBtn?.addEventListener("click", () => {
+    state.devGpsDisabled = !state.devGpsDisabled;
+    persist();
+    applyPrivacyState();
+  });
+  els.developerDeleteLocationBtn?.addEventListener("click", () => {
+    deleteDeveloperLocations();
+    showGlobalToast("저장된 위치 정보를 삭제했어요.", "default");
+    applyPrivacyState();
+  });
+  els.developerDeleteLunchDataBtn?.addEventListener("click", () => {
+    deleteDeveloperLunchData();
+    showGlobalToast("저장된 식당 데이터를 삭제했어요.", "default");
+    applyPrivacyState();
+  });
+  els.developerCloseBtn?.addEventListener("click", () => {
+    isDevModeVisible = false;
+    state.devModeUnlocked = false;
+    state.devGpsDisabled = false;
+    persist();
+    setDeveloperMenuOpen(false);
+    applyPrivacyState();
   });
   els.lockBtn.addEventListener("click", lockApp);
   els.settingsBtn.addEventListener("click", () => {
@@ -7048,6 +7674,7 @@ function initPrivacyControls(state, persist) {
       applyPrivacyState();
     }
     if (event.key === "Escape") {
+      setDeveloperMenuOpen(false);
       setMenuOpen(false);
       closeSettingsModal();
     }
@@ -7057,6 +7684,66 @@ function initPrivacyControls(state, persist) {
     if (!els.fab?.contains(event.target)) {
       setMenuOpen(false);
     }
+    if (!els.developerFab?.contains(event.target)) {
+      setDeveloperMenuOpen(false);
+    }
+  });
+
+  const heroMark = document.getElementById("heroMark");
+  const unlockTargets = [els.fab, els.fabBtn, els.developerFab, els.developerFabBtn].filter(Boolean);
+
+  heroMark?.addEventListener("dragstart", (event) => {
+    isDraggingDevUnlock = true;
+    event.dataTransfer?.setData("text/plain", "horse");
+    if (event.dataTransfer) {
+      event.dataTransfer.effectAllowed = "move";
+    }
+    if (els.fab) {
+      els.fab.classList.add("dev-unlock-target");
+    }
+  });
+
+  heroMark?.addEventListener("dragend", () => {
+    isDraggingDevUnlock = false;
+    els.fab?.classList.remove("dev-unlock-target");
+    els.fab?.classList.remove("dev-unlock-hover");
+  });
+
+  unlockTargets.forEach((target) => {
+    target.addEventListener("dragover", (event) => {
+      const hasUnlockToken = isDraggingDevUnlock || Array.from(event.dataTransfer?.types || []).includes("text/plain");
+      if (!hasUnlockToken) return;
+      event.preventDefault();
+      if (event.dataTransfer) {
+        event.dataTransfer.dropEffect = "move";
+      }
+    });
+
+    target.addEventListener("dragenter", (event) => {
+      const hasUnlockToken = isDraggingDevUnlock || Array.from(event.dataTransfer?.types || []).includes("text/plain");
+      if (!hasUnlockToken) return;
+      event.preventDefault();
+      els.fab?.classList.add("dev-unlock-hover");
+    });
+
+    target.addEventListener("dragleave", (event) => {
+      if (els.fab?.contains(event.relatedTarget)) return;
+      els.fab?.classList.remove("dev-unlock-hover");
+    });
+
+    target.addEventListener("drop", (event) => {
+      const hasUnlockToken = isDraggingDevUnlock || Array.from(event.dataTransfer?.types || []).includes("text/plain");
+      if (!hasUnlockToken) return;
+      event.preventDefault();
+      isDraggingDevUnlock = false;
+      isDevModeVisible = true;
+      state.devModeUnlocked = true;
+      persist();
+      els.fab?.classList.remove("dev-unlock-target");
+      els.fab?.classList.remove("dev-unlock-hover");
+      applyPrivacyState();
+      setDeveloperMenuOpen(true);
+    });
   });
 
   document.addEventListener("keyup", (event) => {
@@ -7075,6 +7762,7 @@ function initPrivacyControls(state, persist) {
   });
 
   setMenuOpen(false);
+  setDeveloperMenuOpen(false);
   applyPrivacyState();
 }
 
