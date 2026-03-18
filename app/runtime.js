@@ -62,7 +62,37 @@ const lunchPlaces = [
 
 // FILE: .\v1.4\app\core\storage.js
 const STORAGE_KEY = "salary_local_dashboard_split_v1";
-function loadFromStorage(fallback) {
+const STORAGE_DB_NAME = "office_lab_dashboard";
+const STORAGE_DB_VERSION = 1;
+const STORAGE_STORE_NAME = "app_state";
+const STORAGE_RECORD_KEY = "main";
+let storageDbPromise = null;
+let persistTimer = null;
+
+function openStorageDb() {
+  if (storageDbPromise) return storageDbPromise;
+  storageDbPromise = new Promise((resolve, reject) => {
+    if (!("indexedDB" in window)) {
+      reject(new Error("indexeddb-unavailable"));
+      return;
+    }
+    const request = indexedDB.open(STORAGE_DB_NAME, STORAGE_DB_VERSION);
+    request.onerror = () => reject(request.error || new Error("indexeddb-open-failed"));
+    request.onupgradeneeded = () => {
+      const db = request.result;
+      if (!db.objectStoreNames.contains(STORAGE_STORE_NAME)) {
+        db.createObjectStore(STORAGE_STORE_NAME, { keyPath: "id" });
+      }
+    };
+    request.onsuccess = () => resolve(request.result);
+  }).catch((error) => {
+    storageDbPromise = null;
+    throw error;
+  });
+  return storageDbPromise;
+}
+
+function readLegacyStorage(fallback) {
   const saved = localStorage.getItem(STORAGE_KEY);
   if (!saved) return structuredClone(fallback);
 
@@ -73,8 +103,73 @@ function loadFromStorage(fallback) {
     return structuredClone(fallback);
   }
 }
-function saveToStorage(state) {
-  localStorage.setItem(STORAGE_KEY, JSON.stringify(state));
+
+async function loadFromStorage(fallback) {
+  const base = structuredClone(fallback);
+  try {
+    const db = await openStorageDb();
+    const storedState = await new Promise((resolve, reject) => {
+      const tx = db.transaction(STORAGE_STORE_NAME, "readonly");
+      const store = tx.objectStore(STORAGE_STORE_NAME);
+      const request = store.get(STORAGE_RECORD_KEY);
+      request.onerror = () => reject(request.error || new Error("indexeddb-read-failed"));
+      request.onsuccess = () => resolve(request.result?.value || null);
+    });
+    if (storedState && typeof storedState === "object") {
+      return { ...base, ...storedState };
+    }
+
+    const migrated = readLegacyStorage(fallback);
+    if (localStorage.getItem(STORAGE_KEY)) {
+      await saveToStorage(migrated, { immediate: true });
+      localStorage.removeItem(STORAGE_KEY);
+    }
+    return migrated;
+  } catch (error) {
+    console.error("indexeddb load error", error);
+    return readLegacyStorage(fallback);
+  }
+}
+
+async function writeStateSnapshot(snapshot) {
+  const db = await openStorageDb();
+  await new Promise((resolve, reject) => {
+    const tx = db.transaction(STORAGE_STORE_NAME, "readwrite");
+    const store = tx.objectStore(STORAGE_STORE_NAME);
+    const request = store.put({ id: STORAGE_RECORD_KEY, value: snapshot });
+    request.onerror = () => reject(request.error || new Error("indexeddb-write-failed"));
+    tx.oncomplete = () => resolve();
+    tx.onerror = () => reject(tx.error || new Error("indexeddb-transaction-failed"));
+  });
+}
+
+function saveToStorage(state, options = {}) {
+  const snapshot = JSON.parse(JSON.stringify(state));
+  const commit = async () => {
+    try {
+      await writeStateSnapshot(snapshot);
+    } catch (error) {
+      console.error("indexeddb save error", error);
+      try {
+        localStorage.setItem(STORAGE_KEY, JSON.stringify(snapshot));
+      } catch (storageError) {
+        console.error("localStorage fallback save error", storageError);
+      }
+    }
+  };
+
+  if (options.immediate) {
+    return commit();
+  }
+
+  if (persistTimer) {
+    window.clearTimeout(persistTimer);
+  }
+  persistTimer = window.setTimeout(() => {
+    persistTimer = null;
+    void commit();
+  }, 0);
+  return Promise.resolve();
 }
 
 
@@ -110,6 +205,9 @@ const defaultState = {
   privacyPinHash: "",
   privacyModeActivated: false,
   devGpsDisabled: false,
+  devLunchAlertEnabled: false,
+  devTodoAlertEnabled: false,
+  devTrackerAlertEnabled: false,
   devModeUnlocked: false,
   bookmarks: [],
   bookmarkGroups: [],
@@ -141,9 +239,13 @@ const defaultState = {
   dependents: 1,
   nontaxMeal: 200000
 };
-const state = loadFromStorage(defaultState);
+const state = structuredClone(defaultState);
+const storageReady = loadFromStorage(defaultState).then((loadedState) => {
+  Object.assign(state, loadedState);
+  return state;
+});
 function persist() {
-  saveToStorage(state);
+  void saveToStorage(state);
 }
 
 
@@ -882,16 +984,25 @@ function initTrackerTab(root, { state, persist }) {
     const leaveSoonStart = autoStopDate ? new Date(autoStopDate.getTime() - 60 * 60 * 1000) : null;
     const shouldPulseAfterWork = state.trackerAfterWorkAlertAt > 0 && (now.getTime() - state.trackerAfterWorkAlertAt) < 12000;
 
+    if (state.devTrackerAlertEnabled) {
+      setTabAlert("tracker", "tracker", true);
+      setGlobalTrackerAlert("슬슬 퇴근 준비하세요~!! 칼퇴는 직장인의 미덕😘", "leave-soon", true);
+      return;
+    }
+
     if (state.trackerAfterWorkMessageDate === todayKey) {
+      setTabAlert("tracker", "tracker", false);
       setGlobalTrackerAlert("고민 말고 나가세요. 고민은 퇴근만 늦출 뿐...", "clocked-out", shouldPulseAfterWork);
       return;
     }
 
     if (isLiveWorkSession(entry, today) && leaveSoonStart && now.getTime() >= leaveSoonStart.getTime() && now.getTime() < autoStopDate.getTime()) {
+      setTabAlert("tracker", "tracker", true);
       setGlobalTrackerAlert("슬슬 퇴근 준비하세요~!! 칼퇴는 직장인의 미덕😘", "leave-soon", true);
       return;
     }
 
+    setTabAlert("tracker", "tracker", false);
     setGlobalTrackerAlert("", "", false);
   }
 
@@ -4122,6 +4233,16 @@ function initTodoTab(root, { state, persist }) {
   }
 
   function getTodoAlertState() {
+    if (state.devTodoAlertEnabled) {
+      const fallbackItem = state.todoItems.find((item) => !item.completed) || state.todoItems[0];
+      const title = fallbackItem?.title || "테스트 일정";
+      return {
+        tone: "imminent",
+        text: `${title} 종료 임박!`,
+        todoId: fallbackItem?.id || ""
+      };
+    }
+
     const now = Date.now();
     const threshold = now + (3 * 60 * 60 * 1000);
     const pendingItems = state.todoItems
@@ -4325,6 +4446,7 @@ function initTodoTab(root, { state, persist }) {
       closeModal();
     }
   });
+  window.addEventListener("developer-alert-change", render);
 
   ensureTodoState();
   render();
@@ -4345,6 +4467,7 @@ function initTodoTab(root, { state, persist }) {
       }
     },
     destroy() {
+      window.removeEventListener("developer-alert-change", render);
       if (tabAlertTimer) clearInterval(tabAlertTimer);
       if (reminderTimer) clearInterval(reminderTimer);
       setTabAlert("todo", "todo", false);
@@ -5226,6 +5349,9 @@ out center tags;
 
   function getLunchAlertState() {
     ensureLunchState();
+    if (state.devLunchAlertEnabled) {
+      return { active: true, imminent: true, text: "점심시간 임박!!" };
+    }
     if (!state.lunchStartTime || !state.lunchEndTime) return { active: false, imminent: false, text: "" };
 
     const startSeconds = timeToSeconds(state.lunchStartTime);
@@ -5925,7 +6051,12 @@ out center tags;
   els.savedLocationCancelBtn?.addEventListener("click", closeSavedLocationModal);
   els.savedLocationSaveBtn?.addEventListener("click", saveSavedLocation);
   els.savedLocationDeleteBtn?.addEventListener("click", deleteSavedLocation);
+  const handleDeveloperAlertChange = () => {
+    updateLunchTabAlert();
+    render();
+  };
   window.addEventListener("developer-state-change", render);
+  window.addEventListener("developer-alert-change", handleDeveloperAlertChange);
   els.drawModal?.addEventListener("click", (event) => {
     if (event.target === els.drawModal) {
       closeDrawModal();
@@ -6022,6 +6153,7 @@ out center tags;
     },
     destroy() {
       window.removeEventListener("developer-state-change", render);
+      window.removeEventListener("developer-alert-change", handleDeveloperAlertChange);
       if (tabAlertTimer) clearInterval(tabAlertTimer);
       setTabAlert("lunch", "lunch", false);
       setGlobalLunchAlert(false);
@@ -7322,6 +7454,7 @@ function initPrivacyControls(state, persist) {
   wrapper.innerHTML = `
     <div id="developerFab" class="developer-fab">
       <div id="developerFabMenu" class="developer-fab-menu" aria-hidden="true">
+        <div id="developerStorageMeta" class="developer-meta"></div>
         <button id="developerGpsBtn" type="button" class="privacy-fab-action" title="GPS 비활성 모드">
           <span class="privacy-fab-action-label">GPS 비활성</span>
         </button>
@@ -7330,6 +7463,24 @@ function initPrivacyControls(state, persist) {
         </button>
         <button id="developerDeleteLunchDataBtn" type="button" class="privacy-fab-action" title="식당정보 삭제">
           <span class="privacy-fab-action-label">식당정보 삭제</span>
+        </button>
+        <button id="developerResetStorageBtn" type="button" class="privacy-fab-action" title="스토리지 초기화">
+          <span class="privacy-fab-action-label">스토리지 초기화</span>
+        </button>
+        <button id="developerToastTestBtn" type="button" class="privacy-fab-action" title="토스트 테스트">
+          <span class="privacy-fab-action-label">토스트 테스트</span>
+        </button>
+        <button id="developerResetPinBtn" type="button" class="privacy-fab-action" title="PIN 초기화">
+          <span class="privacy-fab-action-label">PIN 초기화</span>
+        </button>
+        <button id="developerLunchAlertBtn" type="button" class="privacy-fab-action" title="점심 알림 테스트">
+          <span class="privacy-fab-action-label">점심 알림</span>
+        </button>
+        <button id="developerTodoAlertBtn" type="button" class="privacy-fab-action" title="할 일 알림 테스트">
+          <span class="privacy-fab-action-label">할 일 알림</span>
+        </button>
+        <button id="developerTrackerAlertBtn" type="button" class="privacy-fab-action" title="퇴근 알림 테스트">
+          <span class="privacy-fab-action-label">퇴근 알림</span>
         </button>
         <button id="developerCloseBtn" type="button" class="privacy-fab-action" title="개발자 모드 종료">
           <span class="privacy-fab-action-label">개발자모드 종료</span>
@@ -7422,9 +7573,16 @@ function initPrivacyControls(state, persist) {
     developerFab: document.getElementById("developerFab"),
     developerFabBtn: document.getElementById("developerFabBtn"),
     developerFabMenu: document.getElementById("developerFabMenu"),
+    developerStorageMeta: document.getElementById("developerStorageMeta"),
     developerGpsBtn: document.getElementById("developerGpsBtn"),
     developerDeleteLocationBtn: document.getElementById("developerDeleteLocationBtn"),
     developerDeleteLunchDataBtn: document.getElementById("developerDeleteLunchDataBtn"),
+    developerResetStorageBtn: document.getElementById("developerResetStorageBtn"),
+    developerToastTestBtn: document.getElementById("developerToastTestBtn"),
+    developerResetPinBtn: document.getElementById("developerResetPinBtn"),
+    developerLunchAlertBtn: document.getElementById("developerLunchAlertBtn"),
+    developerTodoAlertBtn: document.getElementById("developerTodoAlertBtn"),
+    developerTrackerAlertBtn: document.getElementById("developerTrackerAlertBtn"),
     developerCloseBtn: document.getElementById("developerCloseBtn"),
     fab: document.getElementById("privacyFab"),
     fabBtn: document.getElementById("privacyFabBtn"),
@@ -7456,6 +7614,10 @@ function initPrivacyControls(state, persist) {
   let isDraggingDevUnlock = false;
   function emitDeveloperStateChange() {
     window.dispatchEvent(new CustomEvent("developer-state-change"));
+  }
+
+  function emitDeveloperAlertChange() {
+    window.dispatchEvent(new CustomEvent("developer-alert-change"));
   }
 
   function deleteDeveloperLocations() {
@@ -7493,6 +7655,84 @@ function initPrivacyControls(state, persist) {
     els.developerFab?.classList.toggle("open", isDeveloperMenuOpen);
     els.developerFabBtn?.setAttribute("aria-expanded", String(isDeveloperMenuOpen));
     els.developerFabMenu?.setAttribute("aria-hidden", String(!isDeveloperMenuOpen));
+    if (isDeveloperMenuOpen) {
+      syncDeveloperMeta();
+    }
+  }
+
+  function syncDeveloperMeta() {
+    if (!els.developerStorageMeta) return;
+    const bytes = new TextEncoder().encode(JSON.stringify(state)).length;
+    const sizeLabel = bytes < 1024 ? `${bytes}B` : `${(bytes / 1024).toFixed(1)}KB`;
+    const workdayCount = Object.keys(state.entries || {}).length;
+    const todoCount = Array.isArray(state.todoItems) ? state.todoItems.length : 0;
+    const bookmarkCount = Array.isArray(state.bookmarks) ? state.bookmarks.length : 0;
+    els.developerStorageMeta.textContent = `저장용량 ${sizeLabel} · 할 일 ${todoCount} · 북마크 ${bookmarkCount} · 근무기록 ${workdayCount}`;
+  }
+
+  async function resetDeveloperStorage() {
+    localStorage.removeItem(STORAGE_KEY);
+    try {
+      const db = await openStorageDb();
+      db.close();
+    } catch (error) {
+      console.error(error);
+    }
+    await new Promise((resolve) => {
+      const request = indexedDB.deleteDatabase(STORAGE_DB_NAME);
+      request.onerror = () => resolve();
+      request.onsuccess = () => resolve();
+      request.onblocked = () => resolve();
+    });
+    showGlobalToast("스토리지를 초기화했어요. 페이지를 새로고침합니다.", "success");
+    window.setTimeout(() => window.location.reload(), 500);
+  }
+
+  function runDeveloperToastTest() {
+    showGlobalToast("전역알림토스트 테스트를 시작했어요.", "loading", 1200);
+    window.setTimeout(() => showGlobalToast("성공 토스트 테스트예요.", "success"), 180);
+    window.setTimeout(() => showGlobalToast("에러 토스트 테스트예요.", "error"), 360);
+  }
+
+  function resetDeveloperPin() {
+    state.privacyPinHash = "";
+    isLocked = false;
+    persist();
+    applyPrivacyState();
+    showGlobalToast("잠금 PIN을 초기화했어요.", "success");
+  }
+
+  function toggleDeveloperLunchAlert() {
+    state.devLunchAlertEnabled = !state.devLunchAlertEnabled;
+    persist();
+    applyPrivacyState();
+    emitDeveloperAlertChange();
+    showGlobalToast(
+      state.devLunchAlertEnabled ? "점심 알림 테스트를 켰어요." : "점심 알림 테스트를 껐어요.",
+      "default"
+    );
+  }
+
+  function toggleDeveloperTodoAlert() {
+    state.devTodoAlertEnabled = !state.devTodoAlertEnabled;
+    persist();
+    applyPrivacyState();
+    emitDeveloperAlertChange();
+    showGlobalToast(
+      state.devTodoAlertEnabled ? "할 일 알림 테스트를 켰어요." : "할 일 알림 테스트를 껐어요.",
+      "default"
+    );
+  }
+
+  function toggleDeveloperTrackerAlert() {
+    state.devTrackerAlertEnabled = !state.devTrackerAlertEnabled;
+    persist();
+    applyPrivacyState();
+    syncTrackerHeaderAlert();
+    showGlobalToast(
+      state.devTrackerAlertEnabled ? "퇴근 알림 테스트를 켰어요." : "퇴근 알림 테스트를 껐어요.",
+      "default"
+    );
   }
 
   function applyPrivacyState() {
@@ -7509,6 +7749,12 @@ function initPrivacyControls(state, persist) {
     els.fabBtn.title = state.privacyMode ? "프라이버시 메뉴 열기 (잠김)" : "프라이버시 메뉴 열기 (열림)";
     els.developerGpsBtn?.classList.toggle("active", Boolean(state.devGpsDisabled));
     els.developerGpsBtn?.setAttribute("aria-pressed", state.devGpsDisabled ? "true" : "false");
+    els.developerLunchAlertBtn?.classList.toggle("active", Boolean(state.devLunchAlertEnabled));
+    els.developerLunchAlertBtn?.setAttribute("aria-pressed", state.devLunchAlertEnabled ? "true" : "false");
+    els.developerTodoAlertBtn?.classList.toggle("active", Boolean(state.devTodoAlertEnabled));
+    els.developerTodoAlertBtn?.setAttribute("aria-pressed", state.devTodoAlertEnabled ? "true" : "false");
+    els.developerTrackerAlertBtn?.classList.toggle("active", Boolean(state.devTrackerAlertEnabled));
+    els.developerTrackerAlertBtn?.setAttribute("aria-pressed", state.devTrackerAlertEnabled ? "true" : "false");
     els.developerFab?.classList.toggle("hidden", !isDevModeVisible);
     els.lockOverlay.classList.toggle("open", Boolean(isLocked));
     els.lockOverlay.setAttribute("aria-hidden", String(!isLocked));
@@ -7517,6 +7763,7 @@ function initPrivacyControls(state, persist) {
     }
     els.hint?.classList.toggle("hidden", Boolean(state.privacyModeActivated));
     window.dispatchEvent(new CustomEvent("privacy-mode-change", { detail: { enabled: Boolean(state.privacyMode) } }));
+    syncDeveloperMeta();
   }
 
   function openSettingsModal(message = "") {
@@ -7595,13 +7842,32 @@ function initPrivacyControls(state, persist) {
     showGlobalToast("저장된 식당 데이터를 삭제했어요.", "default");
     applyPrivacyState();
   });
+  els.developerResetStorageBtn?.addEventListener("click", () => {
+    const shouldReset = window.confirm("IndexedDB와 기존 저장 데이터를 모두 초기화할까요? 페이지가 새로고침됩니다.");
+    if (!shouldReset) return;
+    void resetDeveloperStorage();
+  });
+  els.developerToastTestBtn?.addEventListener("click", runDeveloperToastTest);
+  els.developerResetPinBtn?.addEventListener("click", () => {
+    const shouldResetPin = window.confirm("저장된 잠금 PIN을 초기화할까요?");
+    if (!shouldResetPin) return;
+    resetDeveloperPin();
+  });
+  els.developerLunchAlertBtn?.addEventListener("click", toggleDeveloperLunchAlert);
+  els.developerTodoAlertBtn?.addEventListener("click", toggleDeveloperTodoAlert);
+  els.developerTrackerAlertBtn?.addEventListener("click", toggleDeveloperTrackerAlert);
   els.developerCloseBtn?.addEventListener("click", () => {
     isDevModeVisible = false;
     state.devModeUnlocked = false;
     state.devGpsDisabled = false;
+    state.devLunchAlertEnabled = false;
+    state.devTodoAlertEnabled = false;
+    state.devTrackerAlertEnabled = false;
     persist();
     setDeveloperMenuOpen(false);
     applyPrivacyState();
+    emitDeveloperAlertChange();
+    syncTrackerHeaderAlert();
   });
   els.lockBtn.addEventListener("click", lockApp);
   els.settingsBtn.addEventListener("click", () => {
@@ -7769,6 +8035,7 @@ function initPrivacyControls(state, persist) {
 
 async function bootstrap() {
   const host = document.getElementById("tabHost");
+  await storageReady;
   initHeroZodiacMark();
   placeGlobalLunchAlertNearTitle();
   moveHomeGuideButtonToTabBar();

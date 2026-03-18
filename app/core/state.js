@@ -31,6 +31,9 @@ const defaultState = {
   privacyPinHash: "",
   privacyModeActivated: false,
   devGpsDisabled: false,
+  devLunchAlertEnabled: false,
+  devTodoAlertEnabled: false,
+  devTrackerAlertEnabled: false,
   devModeUnlocked: false,
   bookmarks: [],
   bookmarkGroups: [],
@@ -63,8 +66,12 @@ const defaultState = {
   nontaxMeal: 200000
 };
 
-export const state = loadFromStorage(defaultState);
+export const state = structuredClone(defaultState);
+export const storageReady = loadFromStorage(defaultState).then((loadedState) => {
+  Object.assign(state, loadedState);
+  return state;
+});
 
 export function persist() {
-  saveToStorage(state);
+  void saveToStorage(state);
 }

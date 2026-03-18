@@ -1,4 +1,4 @@
-import { state, persist } from "./core/state.js";
+import { state, persist, storageReady } from "./core/state.js";
 import { bindTabButtons, loadTabs, setActiveTab } from "./core/tabs.js";
 import { initTrackerTab } from "./tracker/tracker.js";
 import { trackerTemplate } from "./tracker/view.js";
@@ -314,6 +314,7 @@ function initHomeGuide() {
 
 async function bootstrap() {
   const host = document.getElementById("tabHost");
+  await storageReady;
   initHeroZodiacMark();
   initHomeGuide();
   const tabs = await loadTabs(host, tabConfigs, { state, persist });

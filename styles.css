@@ -96,6 +96,19 @@ button, input, select, textarea {
   transition: opacity 0.2s ease, transform 0.24s ease;
 }
 
+.developer-meta {
+  max-width: 230px;
+  padding: 10px 12px;
+  border-radius: 14px;
+  border: 1px solid rgba(148, 163, 184, 0.14);
+  background: rgba(15, 23, 42, 0.92);
+  color: #94a3b8;
+  font-size: 12px;
+  font-weight: 700;
+  line-height: 1.45;
+  text-align: right;
+}
+
 .developer-fab.open .developer-fab-menu {
   opacity: 1;
   transform: translateY(0) scale(1);
@@ -775,6 +788,7 @@ button, input, select, textarea {
 
 .tab-btn.tab-alert-todo,
 .tab-btn.tab-alert-lunch,
+.tab-btn.tab-alert-tracker,
 .tab-btn.tab-alert-lunch.active {
   animation: tab-attention-pulse 1.25s ease-in-out infinite;
   border-color: rgba(250, 204, 21, 0.34);
@@ -5580,6 +5594,21 @@ td.date-sunday {
 @media (max-width: 760px) {
   body {
     padding: 14px;
+  }
+
+  .hero-home-btn,
+  .developer-fab,
+  .bookmark-drop-hint {
+    display: none !important;
+  }
+
+  .tracker-tab-label-hover {
+    display: none;
+  }
+
+  .tracker-tab-btn .tracker-tab-label-default {
+    transform: none !important;
+    opacity: 1 !important;
   }
 
   .bookmarks-header,
