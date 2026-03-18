@@ -181,6 +181,7 @@ const defaultState = {
   calendarYear: new Date().getFullYear(),
   calendarMonth: new Date().getMonth(),
   leaveAllowance: 15,
+  marketCache: null,
   lunchCategory: "한식",
   lunchSearchQuery: "",
   lunchKakaoApiKey: "",
@@ -209,6 +210,7 @@ const defaultState = {
   devTodoAlertEnabled: false,
   devTrackerAlertEnabled: false,
   devModeUnlocked: false,
+  devDockSide: "right",
   bookmarks: [],
   bookmarkGroups: [],
   bookmarkViewMode: "card",
@@ -476,80 +478,98 @@ function setTabAlert(tabId, alertKey, active) {
   button.classList.toggle(className, Boolean(active));
 }
 
-function setGlobalLunchAlert(active, text = "점심시간 임박!!") {
-  const badge = document.getElementById("globalLunchAlert");
-  if (!badge) return;
-  badge.hidden = !active;
-  badge.classList.toggle("active", Boolean(active));
-  badge.style.display = active ? "inline-flex" : "none";
-  badge.textContent = text;
+function getHeroAlertHost() {
+  return document.getElementById("heroAlertHost") || document.querySelector(".hero-title-badges") || document.querySelector(".hero-copy h1");
 }
 
-function ensureGlobalTodoAlertBadge() {
-  let badge = document.getElementById("globalTodoAlert");
-  const title = document.querySelector(".hero-copy h1");
-  if (!title) return null;
-  if (!badge) {
-    badge = document.createElement("span");
-    badge.id = "globalTodoAlert";
-    badge.className = "global-todo-alert";
-    badge.hidden = true;
-    title.appendChild(badge);
-  } else if (!title.contains(badge)) {
-    title.appendChild(badge);
+const GLOBAL_HERO_BADGE_CONFIG = {
+  lunch: {
+    id: "globalLunchAlert",
+    className: "global-lunch-alert"
+  },
+  todo: {
+    id: "globalTodoAlert",
+    className: "global-todo-alert"
+  },
+  tracker: {
+    id: "globalTrackerAlert",
+    className: "global-tracker-alert"
   }
-  return badge;
+};
+
+const globalHeroBadgeState = {
+  lunch: { active: false, text: "", tone: "", pulse: false },
+  todo: { active: false, text: "", tone: "", pulse: false },
+  tracker: { active: false, text: "", tone: "", pulse: false }
+};
+
+function renderGlobalHeroBadges() {
+  const host = getHeroAlertHost();
+  if (!host) return null;
+  const fragment = document.createDocumentFragment();
+  ["lunch", "todo", "tracker"].forEach((type) => {
+    const config = GLOBAL_HERO_BADGE_CONFIG[type];
+    const badgeState = globalHeroBadgeState[type];
+    if (!config || !badgeState?.active || !badgeState.text) return;
+    const badge = document.createElement("span");
+    badge.id = config.id;
+    badge.className = config.className;
+    badge.dataset.alertType = type;
+    badge.dataset.tone = badgeState.tone || "";
+    badge.textContent = badgeState.text;
+    badge.classList.toggle("active", true);
+    badge.classList.toggle("pulse", Boolean(badgeState.pulse));
+    if (type === "lunch") {
+      badge.style.display = "inline-flex";
+    }
+    fragment.appendChild(badge);
+  });
+  host.replaceChildren(fragment);
+  return host;
+}
+
+function setGlobalHeroBadge(type, { active = false, text = "", tone = "", pulse = false } = {}) {
+  globalHeroBadgeState[type] = {
+    active: Boolean(active && text),
+    text: active ? text : "",
+    tone: tone || "",
+    pulse: Boolean(active && text && pulse)
+  };
+  renderGlobalHeroBadges();
+}
+
+function setGlobalLunchAlert(active, text = "점심시간 임박!!") {
+  setGlobalHeroBadge("lunch", {
+    active,
+    text: active ? text : ""
+  });
 }
 
 function setGlobalTodoAlert(text = "", tone = "") {
-  const badge = ensureGlobalTodoAlertBadge();
-  if (!badge) return;
-  badge.hidden = !text;
-  badge.textContent = text;
-  badge.dataset.tone = tone || "";
-  badge.classList.toggle("active", Boolean(text));
-}
-
-function ensureGlobalTrackerAlertBadge() {
-  let badge = document.getElementById("globalTrackerAlert");
-  const title = document.querySelector(".hero-copy h1");
-  if (!title) return null;
-  if (!badge) {
-    badge = document.createElement("span");
-    badge.id = "globalTrackerAlert";
-    badge.className = "global-tracker-alert";
-    badge.hidden = true;
-    title.appendChild(badge);
-  } else if (!title.contains(badge)) {
-    title.appendChild(badge);
-  }
-  return badge;
+  setGlobalHeroBadge("todo", {
+    active: Boolean(text),
+    text,
+    tone
+  });
 }
 
 function setGlobalTrackerAlert(text = "", tone = "", pulse = true) {
-  const badge = ensureGlobalTrackerAlertBadge();
-  if (!badge) return;
-  badge.hidden = !text;
-  badge.textContent = text;
-  badge.dataset.tone = tone || "";
-  badge.classList.toggle("active", Boolean(text));
-  badge.classList.toggle("pulse", Boolean(text && pulse));
+  setGlobalHeroBadge("tracker", {
+    active: Boolean(text),
+    text,
+    tone,
+    pulse
+  });
 }
 
-function placeGlobalLunchAlertNearTitle() {
-  const badge = document.getElementById("globalLunchAlert");
-  const title = document.querySelector(".hero-copy h1");
-  if (!badge || !title || title.contains(badge)) return;
-  title.appendChild(document.createTextNode(" "));
-  title.appendChild(badge);
-}
-
-function moveHomeGuideButtonToTabBar() {
+function ensureGlobalHeaderLayout() {
+  renderGlobalHeroBadges();
   const button = document.getElementById("setHomeGuideBtn");
-  const tabBar = document.querySelector(".tab-bar");
-  if (!button || !tabBar) return;
-  button.classList.add("tab-home-btn");
-  tabBar.appendChild(button);
+  const tabBarActions = document.getElementById("tabBarActions");
+  if (button && tabBarActions && !tabBarActions.contains(button)) {
+    button.classList.add("tab-home-btn");
+    tabBarActions.appendChild(button);
+  }
 }
 
 const SEO_TAB_META = {
@@ -560,6 +580,10 @@ const SEO_TAB_META = {
   income: {
     title: "실수령액표 | 직딩심체요절",
     description: "연봉과 월급 기준으로 실수령액을 빠르게 계산하고 비교할 수 있는 실수령액표 탭입니다."
+  },
+  market: {
+    title: "시장 | 직딩심체요절",
+    description: "원화 기준 환율과 주요 지수, 대표 종목, 가상자산 흐름을 한 화면에서 확인하는 시장 탭입니다."
   },
   bookmarks: {
     title: "북마크 관리 | 직딩심체요절",
@@ -585,8 +609,8 @@ const SEO_TAB_META = {
 
 function updateSeoMeta(activeTabId) {
   const meta = SEO_TAB_META[activeTabId] || {
-    title: "직딩심체요절 | 월급 계산, 점메추, 오늘 할 일, 북마크, 운세, 사다리게임",
-    description: "직장인을 위한 올인원 업무 보조 대시보드. 월급 계산과 점메추, 오늘 할 일, 북마크, 운세, 사다리게임을 한 곳에서 관리하세요."
+    title: "직딩심체요절 | 월급 계산, 시장, 점메추, 오늘 할 일, 북마크, 운세, 사다리게임",
+    description: "직장인을 위한 올인원 업무 보조 대시보드. 월급 계산과 시장 정보, 점메추, 오늘 할 일, 북마크, 운세, 사다리게임을 한 곳에서 관리하세요."
   };
   document.title = meta.title;
   document.querySelector('meta[name="description"]')?.setAttribute("content", meta.description);
@@ -620,6 +644,7 @@ function updateSeoMeta(activeTabId) {
       featureList: [
         "슬기로운 월루생활",
         "실수령액 계산표",
+        "시장 정보",
         "점메추",
         "오늘 할 일 캘린더",
         "북마크 관리",
@@ -631,30 +656,19 @@ function updateSeoMeta(activeTabId) {
 }
 
 function bindGlobalAlertBadges(tabs, state, persist) {
-  ensureGlobalTodoAlertBadge();
-  ensureGlobalTrackerAlertBadge();
+  ensureGlobalHeaderLayout();
   const goToTab = (tabId) => {
     state.activeTab = tabId;
     persist();
     setActiveTab(tabs, tabId);
   };
-
-  document.getElementById("globalLunchAlert")?.addEventListener("click", () => {
-    goToTab("lunch");
-    const lunchTab = tabs.find((tab) => tab.id === "lunch");
-    lunchTab?.controller?.focusAlert?.();
-  });
-
-  document.getElementById("globalTodoAlert")?.addEventListener("click", () => {
-    goToTab("todo");
-    const todoTab = tabs.find((tab) => tab.id === "todo");
-    todoTab?.controller?.focusAlert?.();
-  });
-
-  document.getElementById("globalTrackerAlert")?.addEventListener("click", () => {
-    goToTab("tracker");
-    const trackerTab = tabs.find((tab) => tab.id === "tracker");
-    trackerTab?.controller?.focusAlert?.();
+  getHeroAlertHost()?.addEventListener("click", (event) => {
+    const badge = event.target.closest("[data-alert-type]");
+    if (!badge) return;
+    const tabId = badge.dataset.alertType === "lunch" ? "lunch" : badge.dataset.alertType === "todo" ? "todo" : "tracker";
+    goToTab(tabId);
+    const tab = tabs.find((entry) => entry.id === tabId);
+    tab?.controller?.focusAlert?.();
   });
 }
 
@@ -1965,6 +1979,244 @@ function initIncomeTab(root, { state, persist }) {
 }
 
 
+// FILE: .\v1.4\app\market\view.js
+const marketTemplate = `
+<section class="card market-card">
+  <div class="market-header">
+    <div>
+      <h2>시장</h2>
+      <p class="hint">환율과 주요 시장 흐름을 한눈에 확인해요.</p>
+    </div>
+    <div class="market-header-actions">
+      <button id="marketRefreshBtn" type="button" class="btn btn-muted">환율 조회</button>
+    </div>
+  </div>
+  <div id="marketStatus" class="market-status" aria-live="polite"></div>
+  <div id="marketRateGrid" class="market-rate-grid"></div>
+  <div class="market-widget-grid">
+    <article class="market-widget-card market-widget-card-wide">
+      <div class="market-widget-header">
+        <div>
+          <h3>시장 개요</h3>
+          <p class="hint">지수, 환율, 가상자산 흐름을 빠르게 훑어보세요.</p>
+        </div>
+      </div>
+      <div id="marketOverviewWidget" class="market-widget-frame"></div>
+    </article>
+    <article class="market-widget-card">
+      <div class="market-widget-header">
+        <div>
+          <h3>대표 종목</h3>
+          <p class="hint">자주 보는 대형 종목만 가볍게 확인해요.</p>
+        </div>
+      </div>
+      <div id="marketQuotesWidget" class="market-widget-frame market-widget-frame-compact"></div>
+    </article>
+  </div>
+</section>
+`;
+
+
+// FILE: .\v1.4\app\market\market.js
+function initMarketTab(root, { state, persist }) {
+  const els = {
+    status: root.querySelector("#marketStatus"),
+    rateGrid: root.querySelector("#marketRateGrid"),
+    refreshBtn: root.querySelector("#marketRefreshBtn"),
+    overviewWidget: root.querySelector("#marketOverviewWidget"),
+    quotesWidget: root.querySelector("#marketQuotesWidget")
+  };
+  let didLoad = false;
+
+  function setStatus(text = "", tone = "default") {
+    if (!els.status) return;
+    els.status.textContent = text;
+    els.status.dataset.tone = tone;
+    els.status.hidden = !text;
+  }
+
+  function formatMarketTime(value) {
+    if (!value) return "";
+    const date = new Date(value);
+    if (Number.isNaN(date.getTime())) return "";
+    return `${pad(date.getHours())}:${pad(date.getMinutes())}`;
+  }
+
+  function formatRate(value, decimals = 2) {
+    if (!Number.isFinite(value)) return "--";
+    return value.toLocaleString("ko-KR", {
+      minimumFractionDigits: decimals,
+      maximumFractionDigits: decimals
+    });
+  }
+
+  function renderRates() {
+    const cache = state.marketCache;
+    const cards = [
+      { label: "미국 달러", unit: "1 USD", value: cache?.usdKrw, suffix: "KRW", accent: "blue" },
+      { label: "유로", unit: "1 EUR", value: cache?.eurKrw, suffix: "KRW", accent: "emerald" },
+      { label: "일본 엔", unit: "100 JPY", value: cache?.jpy100Krw, suffix: "KRW", accent: "amber" }
+    ];
+
+    els.rateGrid.innerHTML = cards.map((card) => `
+      <article class="market-rate-card market-rate-card-${card.accent}">
+        <div class="market-rate-label">${card.label}</div>
+        <div class="market-rate-value">${formatRate(card.value)} <span>${card.suffix}</span></div>
+        <div class="market-rate-unit">${card.unit} 기준</div>
+      </article>
+    `).join("");
+
+    if (cache?.updatedAt) {
+      setStatus(`마지막 환율 업데이트 ${formatMarketTime(cache.updatedAt)}`, "success");
+    } else {
+      setStatus("환율을 아직 조회하지 않았어요.", "default");
+    }
+  }
+
+  function mountTradingViewWidget(container, scriptName, config) {
+    if (!container) return;
+    const shell = document.createElement("div");
+    shell.className = "tradingview-widget-container";
+    const slot = document.createElement("div");
+    slot.className = "tradingview-widget-container__widget";
+    const script = document.createElement("script");
+    script.type = "text/javascript";
+    script.async = true;
+    script.src = `https://s3.tradingview.com/external-embedding/${scriptName}.js`;
+    script.text = JSON.stringify(config);
+    shell.append(slot, script);
+    container.replaceChildren(shell);
+  }
+
+  function renderWidgets() {
+    mountTradingViewWidget(els.overviewWidget, "embed-widget-market-overview", {
+      colorTheme: "dark",
+      dateRange: "12M",
+      showChart: true,
+      locale: "kr",
+      isTransparent: true,
+      showSymbolLogo: true,
+      showFloatingTooltip: false,
+      width: "100%",
+      height: 460,
+      plotLineColorGrowing: "rgba(59, 130, 246, 1)",
+      plotLineColorFalling: "rgba(248, 113, 113, 1)",
+      gridLineColor: "rgba(15, 23, 42, 0)",
+      scaleFontColor: "rgba(148, 163, 184, 1)",
+      belowLineFillColorGrowing: "rgba(59, 130, 246, 0.12)",
+      belowLineFillColorFalling: "rgba(248, 113, 113, 0.12)",
+      belowLineFillColorGrowingBottom: "rgba(59, 130, 246, 0.02)",
+      belowLineFillColorFallingBottom: "rgba(248, 113, 113, 0.02)",
+      symbolActiveColor: "rgba(59, 130, 246, 0.16)",
+      tabs: [
+        {
+          title: "지수",
+          symbols: [
+            { s: "FOREXCOM:SPXUSD", d: "S&P 500" },
+            { s: "FOREXCOM:NSXUSD", d: "Nasdaq 100" },
+            { s: "FOREXCOM:DJI", d: "Dow 30" }
+          ]
+        },
+        {
+          title: "환율",
+          symbols: [
+            { s: "FX_IDC:USDKRW", d: "USD/KRW" },
+            { s: "FX_IDC:EURKRW", d: "EUR/KRW" },
+            { s: "FX_IDC:USDJPY", d: "USD/JPY" }
+          ]
+        },
+        {
+          title: "가상자산",
+          symbols: [
+            { s: "BITSTAMP:BTCUSD", d: "Bitcoin" },
+            { s: "BITSTAMP:ETHUSD", d: "Ethereum" },
+            { s: "COINBASE:SOLUSD", d: "Solana" }
+          ]
+        }
+      ]
+    });
+
+    mountTradingViewWidget(els.quotesWidget, "embed-widget-market-quotes", {
+      width: "100%",
+      height: 460,
+      locale: "kr",
+      colorTheme: "dark",
+      backgroundColor: "#0f172a",
+      showSymbolLogo: true,
+      isTransparent: true,
+      symbolsGroups: [
+        {
+          name: "대표 종목",
+          symbols: [
+            { name: "NASDAQ:AAPL", displayName: "Apple" },
+            { name: "NASDAQ:MSFT", displayName: "Microsoft" },
+            { name: "NASDAQ:NVDA", displayName: "NVIDIA" },
+            { name: "NASDAQ:TSLA", displayName: "Tesla" }
+          ]
+        }
+      ]
+    });
+  }
+
+  async function loadRates(force = false) {
+    const toastKey = "market-rates-refresh";
+    if (force) {
+      showGlobalToast("환율을 조회하는 중이에요.", "loading", 0, { key: toastKey });
+      setStatus("원화 기준 환율을 다시 조회하는 중이에요.", "loading");
+    }
+
+    try {
+      const response = await fetch("https://api.frankfurter.dev/v1/latest?base=KRW&symbols=USD,EUR,JPY");
+      if (!response.ok) throw new Error(`market-rates-http-${response.status}`);
+      const data = await response.json();
+      const usdPerKrw = Number(data?.rates?.USD);
+      const eurPerKrw = Number(data?.rates?.EUR);
+      const jpyPerKrw = Number(data?.rates?.JPY);
+      if (!usdPerKrw || !eurPerKrw || !jpyPerKrw) {
+        throw new Error("market-rates-invalid");
+      }
+
+      state.marketCache = {
+        usdKrw: 1 / usdPerKrw,
+        eurKrw: 1 / eurPerKrw,
+        jpy100Krw: 100 / jpyPerKrw,
+        sourceDate: data?.date || "",
+        updatedAt: new Date().toISOString()
+      };
+      persist();
+      renderRates();
+      showGlobalToast("환율 정보를 업데이트했어요.", "success", 2200, { key: toastKey });
+    } catch (error) {
+      console.error(error);
+      dismissGlobalToast(toastKey);
+      renderRates();
+      setStatus("환율을 조회하지 못했어요. 마지막으로 저장된 값을 보여주고 있어요.", "error");
+      showGlobalToast("환율 정보를 조회하지 못했어요.", "error");
+    }
+  }
+
+  els.refreshBtn?.addEventListener("click", () => {
+    void loadRates(true);
+  });
+
+  renderRates();
+
+  return {
+    onTabChange(isActive) {
+      if (!isActive) return;
+      if (!didLoad) {
+        didLoad = true;
+        renderWidgets();
+        if (!state.marketCache) {
+          void loadRates(true);
+        }
+      }
+    },
+    destroy() {}
+  };
+}
+
+
 // FILE: .\v1.4\app\bookmarks\view.js
 const bookmarksTemplate = `
 <section class="card bookmarks-card">
@@ -2081,6 +2333,84 @@ const DEFAULT_BOOKMARKS = [
   { id: "bookmark-default-google", name: "구글", url: "https://www.google.com/", note: "검색", imageUrl: "", color: "", group: "기본", labels: ["검색"] }
 ];
 const BOOKMARK_LABEL_COLOR_PALETTE = ["#60a5fa", "#34d399", "#f59e0b", "#f472b6", "#a78bfa", "#fb7185", "#2dd4bf", "#facc15"];
+const BOOKMARK_PRESET_BRANDS = [
+  { domains: ["naver.com"], label: "N", bg: "#03c75a", fg: "#ffffff", logo: "naver" },
+  { domains: ["google.com"], label: "G", bg: "#ffffff", fg: "#4285f4", logo: "google" },
+  { domains: ["youtube.com", "youtu.be"], label: "YT", bg: "#ff0033", fg: "#ffffff", logo: "youtube" },
+  { domains: ["gmail.com"], label: "M", bg: "#ea4335", fg: "#ffffff", logo: "gmail" },
+  { domains: ["github.com"], label: "GH", bg: "#111827", fg: "#ffffff", logo: "github" },
+  { domains: ["gitlab.com"], label: "GL", bg: "#fc6d26", fg: "#ffffff", logo: "gitlab" },
+  { domains: ["bitbucket.org"], label: "BB", bg: "#0052cc", fg: "#ffffff", logo: "bitbucket" },
+  { domains: ["notion.so", "notion.site"], label: "N", bg: "#111111", fg: "#ffffff", logo: "notion" },
+  { domains: ["openai.com", "chatgpt.com"], label: "AI", bg: "#10a37f", fg: "#ffffff", logo: "openai" },
+  { domains: ["claude.ai"], label: "C", bg: "#c97b39", fg: "#ffffff", logo: "claude" },
+  { domains: ["perplexity.ai"], label: "P", bg: "#0f172a", fg: "#ffffff", logo: "perplexity" },
+  { domains: ["x.com", "twitter.com"], label: "X", bg: "#111111", fg: "#ffffff", logo: "x" },
+  { domains: ["facebook.com"], label: "f", bg: "#1877f2", fg: "#ffffff", logo: "facebook" },
+  { domains: ["instagram.com"], label: "IG", bg: "#e1306c", fg: "#ffffff", logo: "instagram" },
+  { domains: ["threads.net"], label: "@", bg: "#111111", fg: "#ffffff" },
+  { domains: ["linkedin.com"], label: "in", bg: "#0a66c2", fg: "#ffffff", logo: "linkedin" },
+  { domains: ["reddit.com"], label: "R", bg: "#ff4500", fg: "#ffffff" },
+  { domains: ["discord.com"], label: "D", bg: "#5865f2", fg: "#ffffff", logo: "discord" },
+  { domains: ["slack.com"], label: "S", bg: "#4a154b", fg: "#ffffff", logo: "slack" },
+  { domains: ["zoom.us"], label: "Z", bg: "#0b5cff", fg: "#ffffff" },
+  { domains: ["figma.com"], label: "F", bg: "#a259ff", fg: "#ffffff", logo: "figma" },
+  { domains: ["miro.com"], label: "M", bg: "#ffd02f", fg: "#111827" },
+  { domains: ["canva.com"], label: "C", bg: "#00c4cc", fg: "#ffffff" },
+  { domains: ["trello.com"], label: "T", bg: "#0052cc", fg: "#ffffff" },
+  { domains: ["atlassian.net", "atlassian.com"], label: "A", bg: "#0052cc", fg: "#ffffff", logo: "atlassian" },
+  { domains: ["dropbox.com"], label: "DB", bg: "#0061ff", fg: "#ffffff", logo: "dropbox" },
+  { domains: ["drive.google.com", "docs.google.com", "calendar.google.com"], label: "G", bg: "#34a853", fg: "#ffffff" },
+  { domains: ["microsoft.com"], label: "MS", bg: "#2563eb", fg: "#ffffff" },
+  { domains: ["office.com"], label: "O", bg: "#ea580c", fg: "#ffffff" },
+  { domains: ["outlook.com", "live.com"], label: "O", bg: "#0078d4", fg: "#ffffff" },
+  { domains: ["teams.microsoft.com"], label: "T", bg: "#6264a7", fg: "#ffffff" },
+  { domains: ["apple.com"], label: "A", bg: "#111111", fg: "#ffffff" },
+  { domains: ["samsung.com"], label: "S", bg: "#1428a0", fg: "#ffffff" },
+  { domains: ["amazon.com"], label: "a", bg: "#232f3e", fg: "#ffffff" },
+  { domains: ["aliexpress.com"], label: "AE", bg: "#ff4747", fg: "#ffffff" },
+  { domains: ["coupang.com"], label: "CP", bg: "#e11d48", fg: "#ffffff" },
+  { domains: ["11st.co.kr"], label: "11", bg: "#ff4b3e", fg: "#ffffff" },
+  { domains: ["gmarket.co.kr"], label: "G", bg: "#00aaff", fg: "#ffffff" },
+  { domains: ["auction.co.kr"], label: "A", bg: "#e11d48", fg: "#ffffff" },
+  { domains: ["daum.net"], label: "D", bg: "#f97316", fg: "#ffffff" },
+  { domains: ["kakao.com"], label: "K", bg: "#fae100", fg: "#111827", logo: "kakao" },
+  { domains: ["tistory.com"], label: "T", bg: "#f97316", fg: "#ffffff" },
+  { domains: ["velog.io"], label: "V", bg: "#20c997", fg: "#ffffff" },
+  { domains: ["brunch.co.kr"], label: "B", bg: "#00c471", fg: "#ffffff" },
+  { domains: ["stackoverflow.com"], label: "SO", bg: "#f48024", fg: "#ffffff" },
+  { domains: ["inven.co.kr"], label: "I", bg: "#0f172a", fg: "#ffffff" },
+  { domains: ["fmkorea.com"], label: "FM", bg: "#0ea5e9", fg: "#ffffff" },
+  { domains: ["netflix.com"], label: "N", bg: "#e50914", fg: "#ffffff" },
+  { domains: ["spotify.com"], label: "S", bg: "#1db954", fg: "#ffffff", logo: "spotify" },
+  { domains: ["twitch.tv"], label: "TW", bg: "#9146ff", fg: "#ffffff" },
+  { domains: ["steamcommunity.com", "steampowered.com"], label: "ST", bg: "#0f172a", fg: "#ffffff" }
+];
+const BOOKMARK_PRESET_SERVICES = [
+  { hostname: "docs.google.com", pathIncludes: ["/spreadsheets"], label: "GS", bg: "#0f9d58", fg: "#ffffff", logo: "google-sheets" },
+  { hostname: "docs.google.com", pathIncludes: ["/document"], label: "GD", bg: "#1a73e8", fg: "#ffffff", logo: "google-docs" },
+  { hostname: "docs.google.com", pathIncludes: ["/presentation"], label: "GP", bg: "#f9ab00", fg: "#ffffff", logo: "google-slides" },
+  { hostname: "docs.google.com", pathIncludes: ["/forms"], label: "GF", bg: "#9334e6", fg: "#ffffff", logo: "google-forms" },
+  { hostname: "drive.google.com", label: "GD", bg: "#34a853", fg: "#ffffff", logo: "google-drive" },
+  { hostname: "calendar.google.com", label: "GC", bg: "#1a73e8", fg: "#ffffff", logo: "google-calendar" }
+];
+const BOOKMARK_PRESET_KEYWORDS = [
+  { keywords: ["gitlab"], label: "GL", bg: "#fc6d26", fg: "#ffffff", logo: "gitlab" },
+  { keywords: ["github"], label: "GH", bg: "#111827", fg: "#ffffff", logo: "github" },
+  { keywords: ["jira"], label: "J", bg: "#0052cc", fg: "#ffffff", logo: "jira" },
+  { keywords: ["confluence", "wiki"], label: "W", bg: "#172b4d", fg: "#ffffff", logo: "confluence" },
+  { keywords: ["jenkins"], label: "JK", bg: "#d33833", fg: "#ffffff", logo: "jenkins" },
+  { keywords: ["redmine"], label: "R", bg: "#b32024", fg: "#ffffff", logo: "redmine" },
+  { keywords: ["gitea"], label: "GT", bg: "#609926", fg: "#ffffff", logo: "gitea" },
+  { keywords: ["sonarqube"], label: "SQ", bg: "#4e9bcd", fg: "#ffffff" },
+  { keywords: ["grafana"], label: "G", bg: "#f97316", fg: "#ffffff", logo: "grafana" },
+  { keywords: ["kibana", "elastic"], label: "K", bg: "#2563eb", fg: "#ffffff" },
+  { keywords: ["sentry"], label: "S", bg: "#5b4b8a", fg: "#ffffff", logo: "sentry" },
+  { keywords: ["notion"], label: "N", bg: "#111111", fg: "#ffffff", logo: "notion" },
+  { keywords: ["slack"], label: "S", bg: "#4a154b", fg: "#ffffff", logo: "slack" },
+  { keywords: ["discord"], label: "D", bg: "#5865f2", fg: "#ffffff", logo: "discord" }
+];
+const BOOKMARK_PRESET_LOGO_CACHE = new Map();
 const DEFAULT_BOOKMARK_GROUP = "기타";
 function ensureBookmarksState(state) {
   state.bookmarks = Array.isArray(state.bookmarks) ? state.bookmarks.filter((item) => item && typeof item === "object").slice(0, MAX_BOOKMARKS).map((item) => ({
@@ -2190,6 +2520,358 @@ function getBookmarkHostname(url) {
   } catch (error) {
     return "";
   }
+}
+function escapeBookmarkSvgText(value) {
+  return String(value || "").replace(/&/g, "&amp;").replace(/</g, "&lt;").replace(/>/g, "&gt;").replace(/"/g, "&quot;").replace(/'/g, "&#39;");
+}
+function buildBookmarkBrandSvg(spec) {
+  switch (spec.logo) {
+    case "google-docs":
+      return `
+        <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 64 64">
+          <rect width="64" height="64" rx="18" fill="#EFF4FF"/>
+          <path fill="#1A73E8" d="M22 13h14.5L46 22.6V49a3 3 0 0 1-3 3H22a3 3 0 0 1-3-3V16a3 3 0 0 1 3-3z"/>
+          <path fill="#8AB4F8" d="M36.5 13v9.6a2 2 0 0 0 2 2H48z"/>
+          <path fill="#fff" d="M26 28h12v2.8H26zm0 6.8h12v2.8H26zm0 6.8h9.5v2.8H26z"/>
+        </svg>
+      `.trim();
+    case "google-sheets":
+      return `
+        <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 64 64">
+          <rect width="64" height="64" rx="18" fill="#EEF8F1"/>
+          <path fill="#0F9D58" d="M22 13h14.5L46 22.6V49a3 3 0 0 1-3 3H22a3 3 0 0 1-3-3V16a3 3 0 0 1 3-3z"/>
+          <path fill="#81C995" d="M36.5 13v9.6a2 2 0 0 0 2 2H48z"/>
+          <rect x="25.5" y="27.5" width="15" height="17" rx="1.8" fill="#fff"/>
+          <path fill="none" stroke="#0F9D58" stroke-width="1.6" d="M31 27.5v17m4 0v-17M25.5 33h15m-15 5.7h15m-15 5.8h15"/>
+        </svg>
+      `.trim();
+    case "google-slides":
+      return `
+        <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 64 64">
+          <rect width="64" height="64" rx="18" fill="#FFF6E5"/>
+          <path fill="#F9AB00" d="M22 13h14.5L46 22.6V49a3 3 0 0 1-3 3H22a3 3 0 0 1-3-3V16a3 3 0 0 1 3-3z"/>
+          <path fill="#FDD663" d="M36.5 13v9.6a2 2 0 0 0 2 2H48z"/>
+          <rect x="25.5" y="27.5" width="15" height="11" rx="1.8" fill="#fff"/>
+          <path fill="#fff" d="M28 42.3h10v2.7H28z"/>
+        </svg>
+      `.trim();
+    case "google-forms":
+      return `
+        <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 64 64">
+          <rect width="64" height="64" rx="18" fill="#F5EDFD"/>
+          <path fill="#9334E6" d="M22 13h14.5L46 22.6V49a3 3 0 0 1-3 3H22a3 3 0 0 1-3-3V16a3 3 0 0 1 3-3z"/>
+          <path fill="#C58AF9" d="M36.5 13v9.6a2 2 0 0 0 2 2H48z"/>
+          <path fill="#fff" d="M27 28.5h3.2v3.2H27zm5.5 0H40v3.2h-7.5zm-5.5 7.1h3.2v3.2H27zm5.5 0H40v3.2h-7.5zm-5.5 7.1h3.2v3.2H27zm5.5 0H40v3.2h-7.5z"/>
+        </svg>
+      `.trim();
+    case "google-drive":
+      return `
+        <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 64 64">
+          <rect width="64" height="64" rx="18" fill="#fff"/>
+          <path fill="#0F9D58" d="M24.5 18h10l13.8 24h-9.9z"/>
+          <path fill="#4285F4" d="M39.6 42H16.3l5.5-9.3h23.3z"/>
+          <path fill="#F4B400" d="M29.7 18h9.8L25.7 42h-10z"/>
+        </svg>
+      `.trim();
+    case "google-calendar":
+      return `
+        <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 64 64">
+          <rect width="64" height="64" rx="18" fill="#E8F0FE"/>
+          <rect x="16" y="17" width="32" height="32" rx="6" fill="#1A73E8"/>
+          <path fill="#8AB4F8" d="M16 25h32v7H16z"/>
+          <path fill="#fff" d="M24 12h4v8h-4zm12 0h4v8h-4zM28 41.8V31h4.2v7.3H36v3.5z"/>
+        </svg>
+      `.trim();
+    case "gmail":
+      return `
+        <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 64 64">
+          <rect width="64" height="64" rx="18" fill="#fff"/>
+          <path fill="#EA4335" d="M16 21.5 32 34l16-12.5V44a4 4 0 0 1-4 4h-4V31.2L32 37l-8-5.8V48h-4a4 4 0 0 1-4-4z"/>
+          <path fill="#FBBC05" d="M16 21.5v3.8l16 11.5 16-11.5v-3.8a4 4 0 0 0-6.4-3.2L32 26l-9.6-7.7A4 4 0 0 0 16 21.5z"/>
+          <path fill="#34A853" d="M48 21.5v26.4a4 4 0 0 0 4-4V24.7z"/>
+          <path fill="#4285F4" d="M16 21.5v22.4a4 4 0 0 0 4 4V24.7z"/>
+        </svg>
+      `.trim();
+    case "bitbucket":
+      return `
+        <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 64 64">
+          <rect width="64" height="64" rx="18" fill="#0052CC"/>
+          <path fill="#fff" d="M16 18h32a2 2 0 0 1 2 2l-4.2 25.5a4 4 0 0 1-4 3.3H22.2a4 4 0 0 1-4-3.3L14 20a2 2 0 0 1 2-2z"/>
+          <path fill="#2684FF" d="M39.3 36H24.7l-2.1-12.4h18.8z"/>
+          <path fill="#0052CC" d="M34.8 42h-5.6l1.2-6h5.5z"/>
+        </svg>
+      `.trim();
+    case "naver":
+      return `
+        <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 64 64">
+          <rect width="64" height="64" rx="18" fill="#03c75a"/>
+          <path fill="#fff" d="M20 18h8l10 15V18h6v28h-8L26 31v15h-6z"/>
+        </svg>
+      `.trim();
+    case "google":
+      return `
+        <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 64 64">
+          <rect width="64" height="64" rx="18" fill="#fff"/>
+          <path fill="#4285F4" d="M52 33.2c0-1.4-.1-2.7-.4-4H32v7.6h11.2c-.5 2.4-1.8 4.5-3.8 5.8v4.8h6.1C49.1 44.3 52 39.3 52 33.2z"/>
+          <path fill="#34A853" d="M32 53c5.4 0 9.9-1.8 13.2-4.9l-6.1-4.8c-1.7 1.1-3.9 1.8-7.1 1.8-5.5 0-10.1-3.7-11.7-8.7h-6.3v5c3.3 6.5 10 10.9 18 10.9z"/>
+          <path fill="#FBBC05" d="M20.3 36.4c-.4-1.1-.6-2.3-.6-3.5s.2-2.4.6-3.5v-5h-6.3C12.7 27 12 29.9 12 32.9s.7 5.9 2 8.5z"/>
+          <path fill="#EA4335" d="M32 20.8c2.9 0 5.4 1 7.4 2.8l5.5-5.5C41.9 15.4 37.4 13 32 13c-8 0-14.7 4.4-18 10.9l6.3 5C21.9 24.5 26.5 20.8 32 20.8z"/>
+        </svg>
+      `.trim();
+    case "youtube":
+      return `
+        <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 64 64">
+          <rect width="64" height="64" rx="18" fill="#fff"/>
+          <rect x="10" y="18" width="44" height="28" rx="10" fill="#FF0033"/>
+          <path fill="#fff" d="M28 25l13 7-13 7z"/>
+        </svg>
+      `.trim();
+    case "github":
+      return `
+        <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 64 64">
+          <rect width="64" height="64" rx="18" fill="#111827"/>
+          <path fill="#fff" d="M32 15c-9.4 0-17 7.6-17 17 0 7.5 4.9 13.9 11.7 16.2.9.2 1.2-.4 1.2-.9v-3.2c-4.8 1-5.8-2.1-5.8-2.1-.8-2-1.9-2.5-1.9-2.5-1.6-1.1.1-1.1.1-1.1 1.8.1 2.8 1.9 2.8 1.9 1.6 2.8 4.3 2 5.4 1.5.2-1.2.6-2 1.2-2.4-3.8-.4-7.8-1.9-7.8-8.5 0-1.9.7-3.5 1.8-4.7-.2-.4-.8-2.2.2-4.6 0 0 1.5-.5 4.9 1.8 1.4-.4 3-.6 4.5-.6s3.1.2 4.5.6c3.4-2.3 4.9-1.8 4.9-1.8 1 2.4.4 4.2.2 4.6 1.1 1.2 1.8 2.8 1.8 4.7 0 6.6-4 8-7.8 8.5.6.5 1.3 1.5 1.3 3.1v4.6c0 .5.3 1.1 1.2.9C44.1 45.9 49 39.5 49 32c0-9.4-7.6-17-17-17z"/>
+        </svg>
+      `.trim();
+    case "gitlab":
+      return `
+        <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 64 64">
+          <rect width="64" height="64" rx="18" fill="#FFF5F1"/>
+          <path fill="#E24329" d="M32 50.4 20.6 31.7h22.8z"/>
+          <path fill="#FC6D26" d="M32 50.4 12.8 31.7h7.8L32 50.4zm0 0 19.2-18.7h-7.8z"/>
+          <path fill="#FCA326" d="M20.6 31.7 25.4 17h13.2l4.8 14.7z"/>
+          <path fill="#E24329" d="M12.8 31.7 18 17h7.4l-4.8 14.7zm38.4 0L46 17h-7.4l4.8 14.7z"/>
+        </svg>
+      `.trim();
+    case "notion":
+      return `
+        <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 64 64">
+          <rect width="64" height="64" rx="18" fill="#fff"/>
+          <path fill="#111" d="M18 16.5l25-2.2 8 6.3v26.9L27 49.7l-10-7.3zm8.8 6.9v20.2l4.7-.4V31.3l9.2 13.4 4.5-.4V24.1l-4.7.4v11.4l-8.9-12.5z"/>
+        </svg>
+      `.trim();
+    case "openai":
+      return `
+        <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 64 64">
+          <rect width="64" height="64" rx="18" fill="#10a37f"/>
+          <path fill="#fff" d="M32 18c2.8-1.6 6.4-.6 8 2.3l4.3 7.4a6.7 6.7 0 0 1-2.3 9.1l-8 4.6-3.4-1.9 10.1-5.8a2.8 2.8 0 0 0 1-3.8l-4.3-7.4a2.8 2.8 0 0 0-3.8-1l-4.7 2.7V18zM24.7 22.3a6.7 6.7 0 0 1 9.1-2.3l7.4 4.3v3.9l-10.1-5.8a2.8 2.8 0 0 0-3.8 1l-4.3 7.4a2.8 2.8 0 0 0 1 3.8l4.7 2.7-3.4 1.9-4.6-2.7a6.7 6.7 0 0 1-2.3-9.1zM21 40.4l3.4-1.9v5.4a2.8 2.8 0 0 0 2.8 2.8h8.6a2.8 2.8 0 0 0 2.8-2.8v-5.4l3.4 1.9v3.5a6.7 6.7 0 0 1-6.7 6.7h-8.6a6.7 6.7 0 0 1-6.7-6.7z"/>
+        </svg>
+      `.trim();
+    case "claude":
+      return `
+        <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 64 64">
+          <rect width="64" height="64" rx="18" fill="#F5E8D8"/>
+          <path fill="#C97B39" d="M31.8 16c8.8 0 16 7.2 16 16S40.6 48 31.8 48 15.8 40.8 15.8 32 23 16 31.8 16zm0 6.2A9.8 9.8 0 1 0 41.6 32a9.8 9.8 0 0 0-9.8-9.8z"/>
+          <path fill="#8B5A2B" d="M31.8 27.3a4.7 4.7 0 1 1 0 9.4 4.7 4.7 0 0 1 0-9.4z"/>
+        </svg>
+      `.trim();
+    case "perplexity":
+      return `
+        <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 64 64">
+          <rect width="64" height="64" rx="18" fill="#0F172A"/>
+          <path fill="none" stroke="#22D3EE" stroke-width="4" stroke-linecap="round" stroke-linejoin="round" d="M20 18v28m0-22 12 6 12-6m-24 16 12-6 12 6m0-22v28"/>
+        </svg>
+      `.trim();
+    case "x":
+      return `
+        <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 64 64">
+          <rect width="64" height="64" rx="18" fill="#111"/>
+          <path fill="#fff" d="M19 17h8.6L34 25.9 41.1 17H45l-9.3 10.7L46 47H37.4L30 37l-8.7 10H17l10.6-12.3z"/>
+        </svg>
+      `.trim();
+    case "facebook":
+      return `
+        <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 64 64">
+          <rect width="64" height="64" rx="18" fill="#1877F2"/>
+          <path fill="#fff" d="M36.2 48V33.9H41l.8-5.5h-5.6V25c0-1.6.4-2.7 2.8-2.7H42v-4.9c-.5 0-2.1-.2-4-.2-4 0-6.8 2.4-6.8 7V28.4h-4.6v5.5h4.6V48z"/>
+        </svg>
+      `.trim();
+    case "instagram":
+      return `
+        <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 64 64">
+          <defs><linearGradient id="ig" x1="0" x2="1" y1="1" y2="0"><stop offset="0" stop-color="#F58529"/><stop offset=".45" stop-color="#DD2A7B"/><stop offset=".7" stop-color="#8134AF"/><stop offset="1" stop-color="#515BD4"/></linearGradient></defs>
+          <rect width="64" height="64" rx="18" fill="url(#ig)"/>
+          <rect x="18" y="18" width="28" height="28" rx="9" fill="none" stroke="#fff" stroke-width="4"/>
+          <circle cx="32" cy="32" r="6.5" fill="none" stroke="#fff" stroke-width="4"/>
+          <circle cx="41.5" cy="22.5" r="2.5" fill="#fff"/>
+        </svg>
+      `.trim();
+    case "linkedin":
+      return `
+        <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 64 64">
+          <rect width="64" height="64" rx="18" fill="#0a66c2"/>
+          <path fill="#fff" d="M20 26h7v22h-7zM23.5 16a4 4 0 1 1 0 8 4 4 0 0 1 0-8zM31 26h6.7v3h.1c.9-1.7 3.2-3.5 6.6-3.5 7.1 0 8.4 4.7 8.4 10.8V48h-7V37.6c0-2.5 0-5.8-3.5-5.8s-4 2.8-4 5.6V48h-7z"/>
+        </svg>
+      `.trim();
+    case "discord":
+      return `
+        <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 64 64">
+          <rect width="64" height="64" rx="18" fill="#5865f2"/>
+          <path fill="#fff" d="M46.7 20.7a28 28 0 0 0-7-2.2l-.3.6c-.4.8-.8 1.6-1.1 2.4a26.3 26.3 0 0 0-12.7 0c-.3-.8-.7-1.6-1.1-2.4l-.3-.6a28 28 0 0 0-7 2.2C12.7 27.7 12 34.5 12.4 41.1a28.2 28.2 0 0 0 8.6 4.3l1.8-2.9a18.3 18.3 0 0 1-2.9-1.4l.7-.5c5.6 2.6 11.7 2.6 17.2 0l.7.5c-.9.6-1.9 1.1-2.9 1.4l1.8 2.9a28.2 28.2 0 0 0 8.6-4.3c.5-7.7-1-14.4-4.7-20.4zM26.5 36.9c-1.7 0-3.1-1.6-3.1-3.5s1.4-3.5 3.1-3.5 3.1 1.6 3.1 3.5-1.4 3.5-3.1 3.5zm11 0c-1.7 0-3.1-1.6-3.1-3.5s1.4-3.5 3.1-3.5 3.1 1.6 3.1 3.5-1.4 3.5-3.1 3.5z"/>
+        </svg>
+      `.trim();
+    case "slack":
+      return `
+        <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 64 64">
+          <rect width="64" height="64" rx="18" fill="#fff"/>
+          <path fill="#36C5F0" d="M24 12a6 6 0 1 1 0 12h-6V18a6 6 0 0 1 6-6z"/>
+          <path fill="#2EB67D" d="M12 24a6 6 0 1 1 12 0v16a6 6 0 1 1-12 0z"/>
+          <path fill="#ECB22E" d="M52 24a6 6 0 1 1-12 0v-6h6a6 6 0 0 1 6 6z"/>
+          <path fill="#E01E5A" d="M40 52a6 6 0 1 1 0-12h16a6 6 0 1 1 0 12z"/>
+          <path fill="#36C5F0" d="M40 12a6 6 0 1 1 12 0v16a6 6 0 1 1-12 0z"/>
+          <path fill="#2EB67D" d="M52 40a6 6 0 1 1-12 0v-6h6a6 6 0 0 1 6 6z"/>
+          <path fill="#ECB22E" d="M12 40a6 6 0 1 1 12 0v6h-6a6 6 0 0 1-6-6z"/>
+          <path fill="#E01E5A" d="M24 12a6 6 0 1 1 0 12H8a6 6 0 1 1 0-12z"/>
+        </svg>
+      `.trim();
+    case "figma":
+      return `
+        <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 64 64">
+          <rect width="64" height="64" rx="18" fill="#fff"/>
+          <circle cx="26" cy="18" r="8" fill="#F24E1E"/><circle cx="38" cy="18" r="8" fill="#FF7262"/>
+          <circle cx="26" cy="32" r="8" fill="#A259FF"/><circle cx="38" cy="32" r="8" fill="#1ABCFE"/>
+          <path fill="#0ACF83" d="M18 46a8 8 0 1 1 16 0 8 8 0 0 1-16 0z"/>
+        </svg>
+      `.trim();
+    case "jira":
+      return `
+        <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 64 64">
+          <rect width="64" height="64" rx="18" fill="#fff"/>
+          <path fill="#2684FF" d="M35.2 16.8a2.3 2.3 0 0 0-3.9 0l-9 14.1a2.3 2.3 0 0 0 2 3.5h6.3l4.7-7.4 4.7 7.4h6.3a2.3 2.3 0 0 0 2-3.5z"/>
+          <path fill="#0052CC" d="M29 31.2 18.7 47a2.3 2.3 0 0 0 2 3.5H27l8.3-13 8.3 13h.7a2.3 2.3 0 0 0 2-3.5L36 31.2a4 4 0 0 0-7 0z"/>
+        </svg>
+      `.trim();
+    case "confluence":
+      return `
+        <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 64 64">
+          <rect width="64" height="64" rx="18" fill="#fff"/>
+          <path fill="#0052CC" d="M19.2 23.5c4.5-3.8 10.3-4.3 16.8-.8l3.4 1.9-3.8 6.4-3.1-1.7c-3.6-2-6.4-1.7-9 .3z"/>
+          <path fill="#2684FF" d="M44.8 40.5c-4.5 3.8-10.3 4.3-16.8.8l-3.4-1.9 3.8-6.4 3.1 1.7c3.6 2 6.4 1.7 9-.3z"/>
+          <path fill="#172B4D" d="M22.7 40.2 32 24.4a2.2 2.2 0 0 1 3.8 0l5.5 9.4-3.8 6.4-3.8-6.5-7.1 12.1h-5.8a2.2 2.2 0 0 1-1.9-3.4z"/>
+        </svg>
+      `.trim();
+    case "atlassian":
+      return `
+        <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 64 64">
+          <rect width="64" height="64" rx="18" fill="#fff"/>
+          <path fill="#2684FF" d="M38 17.2a3.4 3.4 0 0 0-3 1.9L23.4 42.9a1.8 1.8 0 0 0 1.6 2.6h8a3.4 3.4 0 0 0 3-1.9L47.6 19.8a1.8 1.8 0 0 0-1.6-2.6z"/>
+          <path fill="#0052CC" d="M28.3 28.8a3.4 3.4 0 0 0-3 1.9l-6.2 12.8a1.8 1.8 0 0 0 1.6 2.6h8a3.4 3.4 0 0 0 3-1.9l3-6.3a2.6 2.6 0 0 0 0-2.2L30 30.1a1.9 1.9 0 0 0-1.7-1.3z"/>
+        </svg>
+      `.trim();
+    case "dropbox":
+      return `
+        <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 64 64">
+          <rect width="64" height="64" rx="18" fill="#0061ff"/>
+          <path fill="#fff" d="M20 18l12 8-8 6-12-8zm24 0l12 8-12 8-8-6zm-20 16l8 6-12 8-8-6zm20 0l8 6-8 6-8-6zm-12 10l12 8 12-8-12-8z"/>
+        </svg>
+      `.trim();
+    case "kakao":
+      return `
+        <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 64 64">
+          <rect width="64" height="64" rx="18" fill="#fae100"/>
+          <path fill="#111" d="M32 18c-9.4 0-17 5.8-17 13 0 4.7 3.3 8.8 8.2 11l-1.7 6.8c-.1.5.4.9.9.6l8.1-5.2c.5 0 1 .1 1.5.1 9.4 0 17-5.8 17-13s-7.6-13-17-13z"/>
+        </svg>
+      `.trim();
+    case "jenkins":
+      return `
+        <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 64 64">
+          <rect width="64" height="64" rx="18" fill="#fff"/>
+          <circle cx="32" cy="22" r="7" fill="#F4D2B2"/>
+          <path fill="#5B3A29" d="M25 21c2.6-6.1 11.4-6.1 14 0l-2.7 1.3c-1.4-2.8-5.2-2.8-6.6 0z"/>
+          <path fill="#374151" d="M25 31h14l4 17H21z"/>
+          <path fill="#B91C1C" d="M24 31h16l-2 9H26z"/>
+          <path fill="#111827" d="M28 31h8v17h-8z"/>
+        </svg>
+      `.trim();
+    case "redmine":
+      return `
+        <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 64 64">
+          <rect width="64" height="64" rx="18" fill="#fff"/>
+          <path fill="#B32024" d="M32 14 46 22v16L32 50 18 38V22z"/>
+          <path fill="#D94A4A" d="M32 14v36l14-12V22z"/>
+          <path fill="#8C1D20" d="M32 14 18 22v16l14 12z"/>
+        </svg>
+      `.trim();
+    case "gitea":
+      return `
+        <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 64 64">
+          <rect width="64" height="64" rx="18" fill="#609926"/>
+          <path fill="#fff" d="M40.5 21.5a9.5 9.5 0 1 0-17.3 5.3l2.7 4.1 2.3-1.5-2.6-4a5.8 5.8 0 1 1 10.7 0l6.4 10a6.3 6.3 0 0 1-10.6 6.7l-1.8-2.8-2.3 1.5 1.8 2.8A9.8 9.8 0 1 0 46 34.1z"/>
+        </svg>
+      `.trim();
+    case "grafana":
+      return `
+        <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 64 64">
+          <rect width="64" height="64" rx="18" fill="#fff7f2"/>
+          <circle cx="34" cy="34" r="10" fill="#F97316"/>
+          <circle cx="34" cy="34" r="4.2" fill="#fff"/>
+          <path fill="#F97316" d="M22 34a12 12 0 0 1 9-11.6l-3.7-4.7a2 2 0 0 1 3-2.6l4.4 5.3a12 12 0 0 1 9.8 2.2l4.8-2.7a2 2 0 0 1 2 3.4l-4.3 2.5A12 12 0 1 1 22 34z"/>
+        </svg>
+      `.trim();
+    case "sentry":
+      return `
+        <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 64 64">
+          <rect width="64" height="64" rx="18" fill="#fff"/>
+          <path fill="#5B4B8A" d="M19 37.8c2.2 4.8 7 8.2 12.7 8.2 4.5 0 8.5-2 11.1-5.2l3 2a2 2 0 0 0 2.8-.5 2 2 0 0 0-.5-2.8l-4.2-2.9a2 2 0 0 0-2.8.5 9.7 9.7 0 0 1-8.4 4.9c-4.1 0-7.7-2.6-9-6.3a2 2 0 0 0-1.9-1.4H20a2 2 0 0 0-1 3.5z"/>
+          <path fill="#5B4B8A" d="M45 26.2C42.8 21.4 38 18 32.3 18c-4.5 0-8.5 2-11.1 5.2l-3-2a2 2 0 0 0-2.8.5 2 2 0 0 0 .5 2.8l4.2 2.9a2 2 0 0 0 2.8-.5 9.7 9.7 0 0 1 8.4-4.9c4.1 0 7.7 2.6 9 6.3a2 2 0 0 0 1.9 1.4H44a2 2 0 0 0 1-3.5z"/>
+        </svg>
+      `.trim();
+    case "spotify":
+      return `
+        <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 64 64">
+          <rect width="64" height="64" rx="18" fill="#1db954"/>
+          <circle cx="32" cy="32" r="18" fill="#111"/>
+          <path fill="none" stroke="#1db954" stroke-width="3.4" stroke-linecap="round" d="M22 28c7-2.1 15-1.6 22 1.4"/>
+          <path fill="none" stroke="#1db954" stroke-width="3" stroke-linecap="round" d="M24 34c5.8-1.5 12-1.1 17.4 1.2"/>
+          <path fill="none" stroke="#1db954" stroke-width="2.6" stroke-linecap="round" d="M26 39.5c4.4-1.1 9-.8 13.2.9"/>
+        </svg>
+      `.trim();
+    default:
+      return "";
+  }
+}
+function buildBookmarkPresetLogo(spec) {
+  const key = `${spec.logo || ""}|${spec.label}|${spec.bg}|${spec.fg}`;
+  if (BOOKMARK_PRESET_LOGO_CACHE.has(key)) return BOOKMARK_PRESET_LOGO_CACHE.get(key);
+  const label = escapeBookmarkSvgText(spec.label).slice(0, 2);
+  const svg = buildBookmarkBrandSvg(spec) || `
+    <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 64 64">
+      <rect width="64" height="64" rx="18" fill="${spec.bg}"/>
+      <rect x="4" y="4" width="56" height="56" rx="14" fill="none" stroke="rgba(255,255,255,0.18)" stroke-width="2"/>
+      <text x="32" y="39" text-anchor="middle" font-family="Segoe UI, Arial, sans-serif" font-size="${label.length > 1 ? 24 : 28}" font-weight="800" fill="${spec.fg}">${label}</text>
+    </svg>
+  `.trim();
+  const url = `data:image/svg+xml;charset=UTF-8,${encodeURIComponent(svg)}`;
+  BOOKMARK_PRESET_LOGO_CACHE.set(key, url);
+  return url;
+}
+function getBookmarkPresetBrand(source) {
+  const rawSource = String(source || "").trim();
+  if (!rawSource) return null;
+  let normalizedHostname = rawSource.toLowerCase();
+  let normalizedPathname = "";
+  try {
+    const parsed = new URL(rawSource);
+    normalizedHostname = parsed.hostname.replace(/^www\./i, "").toLowerCase();
+    normalizedPathname = parsed.pathname.toLowerCase();
+  } catch (error) {
+    normalizedHostname = rawSource.toLowerCase();
+  }
+  return BOOKMARK_PRESET_SERVICES.find((service) => {
+    const matchesHost = normalizedHostname === service.hostname || normalizedHostname.endsWith(`.${service.hostname}`);
+    if (!matchesHost) return false;
+    if (Array.isArray(service.pathIncludes) && service.pathIncludes.length) {
+      return service.pathIncludes.some((segment) => normalizedPathname.includes(segment));
+    }
+    return true;
+  }) || BOOKMARK_PRESET_BRANDS.find((brand) => brand.domains.some((domain) => normalizedHostname === domain || normalizedHostname.endsWith(`.${domain}`)))
+    || BOOKMARK_PRESET_KEYWORDS.find((brand) => brand.keywords.some((keyword) => normalizedHostname.includes(keyword)))
+    || null;
+}
+function getBookmarkPresetLogo(source) {
+  const preset = getBookmarkPresetBrand(source);
+  if (!preset) return "";
+  return buildBookmarkPresetLogo(preset);
 }
 function hasBookmarkDropPayload(dataTransfer) {
   if (!dataTransfer?.types) return false;
@@ -2734,14 +3416,17 @@ function initBookmarksTab(root, { state, persist }) {
       const groupBookmarks = state.bookmarks.filter((bookmark) => (normalizeBookmarkGroup(bookmark.group) || DEFAULT_BOOKMARK_GROUP) === group);
       const bookmarkCards = groupBookmarks.map((bookmark) => {
         const hostname = getBookmarkHostname(bookmark.url);
-        const faviconCandidates = getBookmarkFaviconCandidates(bookmark.url);
+        const presetLogo = getBookmarkPresetLogo(bookmark.url);
+        const faviconCandidates = presetLogo ? [presetLogo, ...getBookmarkFaviconCandidates(bookmark.url)] : getBookmarkFaviconCandidates(bookmark.url);
+        const mediaClass = faviconCandidates[0] ? "bookmark-media loaded" : "bookmark-media";
+        const faviconClass = presetLogo ? "bookmark-favicon bookmark-favicon-preset" : "bookmark-favicon";
         return `
           <article class="bookmark-item" data-bookmark-open="${bookmark.id}" data-bookmark-id="${bookmark.id}" data-bookmark-group="${escapeHtml(group)}" draggable="true" style="${getBookmarkThemeStyle(bookmark)}">
             ${bookmark.imageUrl ? `<img class="bookmark-cover" src="${escapeHtml(bookmark.imageUrl)}" alt="" loading="lazy" referrerpolicy="no-referrer" />` : ""}
             <div class="bookmark-item-top">
-              <div class="bookmark-media">
+              <div class="${mediaClass}">
                 <img
-                  class="bookmark-favicon"
+                  class="${faviconClass}"
                   data-bookmark-favicon
                   data-bookmark-index="0"
                   data-bookmark-fallbacks='${escapeHtml(JSON.stringify(faviconCandidates))}'
@@ -7067,6 +7752,7 @@ function initLadderTab(root, { state, persist }) {
 const tabConfigs = [
   { id: "tracker", template: trackerTemplate, init: initTrackerTab },
   { id: "income", template: incomeTemplate, init: initIncomeTab },
+  { id: "market", template: marketTemplate, init: initMarketTab },
   { id: "bookmarks", template: bookmarksTemplate, init: initBookmarksTab },
   { id: "todo", template: todoTemplate, init: initTodoTab },
   { id: "lunch", template: lunchTemplate, init: initLunchTab },
@@ -7173,8 +7859,21 @@ async function initWeatherWidget() {
     tempEl.textContent = temperature;
     iconEl.src = buildWeatherIcon(icon);
     iconEl.alt = summary;
+    iconEl.hidden = false;
+    iconEl.classList.remove("empty");
     updatedAtEl.textContent = formatUpdatedAt(updatedAt);
   };
+
+  iconEl.classList.add("empty");
+  iconEl.hidden = true;
+  iconEl.addEventListener("load", () => {
+    iconEl.hidden = false;
+    iconEl.classList.remove("empty");
+  });
+  iconEl.addEventListener("error", () => {
+    iconEl.hidden = true;
+    iconEl.classList.add("empty");
+  });
 
   const setRefreshState = (disabled) => {
     refreshBtn.disabled = disabled;
@@ -7490,6 +8189,7 @@ function initPrivacyControls(state, persist) {
         <span class="developer-fab-label">DEV</span>
       </button>
     </div>
+    <div id="developerDockGhost" class="developer-dock-ghost" aria-hidden="true"></div>
     <div id="privacyFab" class="privacy-fab">
       <div id="privacyHint" class="privacy-hint" role="status">프라이버시 모드를 설정하세요!</div>
       <div id="privacyFabMenu" class="privacy-fab-menu" aria-hidden="true">
@@ -7573,6 +8273,7 @@ function initPrivacyControls(state, persist) {
     developerFab: document.getElementById("developerFab"),
     developerFabBtn: document.getElementById("developerFabBtn"),
     developerFabMenu: document.getElementById("developerFabMenu"),
+    developerDockGhost: document.getElementById("developerDockGhost"),
     developerStorageMeta: document.getElementById("developerStorageMeta"),
     developerGpsBtn: document.getElementById("developerGpsBtn"),
     developerDeleteLocationBtn: document.getElementById("developerDeleteLocationBtn"),
@@ -7612,6 +8313,15 @@ function initPrivacyControls(state, persist) {
   let isPeekShortcutHeld = false;
   let isDevModeVisible = Boolean(state.devModeUnlocked);
   let isDraggingDevUnlock = false;
+  let developerDragPointerId = null;
+  let developerDragStartX = 0;
+  let developerDragStartY = 0;
+  let developerDragMoved = false;
+  let developerDragOffsetX = 0;
+  let developerDragOffsetY = 0;
+  let developerDragGhost = null;
+  let developerDragCleanupTimer = null;
+  let suppressDeveloperClick = false;
   function emitDeveloperStateChange() {
     window.dispatchEvent(new CustomEvent("developer-state-change"));
   }
@@ -7668,6 +8378,112 @@ function initPrivacyControls(state, persist) {
     const todoCount = Array.isArray(state.todoItems) ? state.todoItems.length : 0;
     const bookmarkCount = Array.isArray(state.bookmarks) ? state.bookmarks.length : 0;
     els.developerStorageMeta.textContent = `저장용량 ${sizeLabel} · 할 일 ${todoCount} · 북마크 ${bookmarkCount} · 근무기록 ${workdayCount}`;
+  }
+
+  function applyDeveloperDockSide() {
+    const side = state.devDockSide === "left" ? "left" : "right";
+    els.developerFab?.classList.toggle("dock-left", side === "left");
+    els.developerFab?.classList.toggle("dock-right", side !== "left");
+  }
+
+  function clearDeveloperDockPreview() {
+    els.developerFab?.classList.remove("dragging", "preview-left", "preview-right");
+    els.developerFab?.classList.remove("ghosting");
+    els.developerFab?.style.removeProperty("--dev-drag-x");
+    els.developerFab?.style.removeProperty("--dev-drag-y");
+    els.developerDockGhost?.classList.remove("open", "dock-left", "dock-right");
+  }
+
+  function setDeveloperDockPreview(side) {
+    els.developerDockGhost?.classList.add("open");
+    els.developerDockGhost?.classList.toggle("dock-left", side === "left");
+    els.developerDockGhost?.classList.toggle("dock-right", side !== "left");
+  }
+
+  function destroyDeveloperDragGhost() {
+    if (developerDragCleanupTimer) {
+      window.clearTimeout(developerDragCleanupTimer);
+      developerDragCleanupTimer = null;
+    }
+    developerDragGhost?.remove();
+    developerDragGhost = null;
+  }
+
+  function createDeveloperDragGhost(sourceRect) {
+    destroyDeveloperDragGhost();
+    if (!sourceRect) return null;
+    const ghost = document.createElement("div");
+    ghost.className = "developer-dock-flyer";
+    ghost.textContent = "DEV";
+    ghost.style.left = `${sourceRect.left}px`;
+    ghost.style.top = `${sourceRect.top}px`;
+    ghost.style.width = `${sourceRect.width}px`;
+    ghost.style.height = `${sourceRect.height}px`;
+    document.body.appendChild(ghost);
+    developerDragGhost = ghost;
+    return ghost;
+  }
+
+  function setDeveloperDragGhostPosition(left, top) {
+    if (!developerDragGhost) return;
+    developerDragGhost.style.left = `${left}px`;
+    developerDragGhost.style.top = `${top}px`;
+  }
+
+  function getDeveloperDockTargetPosition(side, width, height) {
+    const computed = els.developerFab ? window.getComputedStyle(els.developerFab) : null;
+    const leftBottom = Number.parseFloat(computed?.getPropertyValue("--developer-dock-left-bottom")) || 18;
+    const rightBottom = Number.parseFloat(computed?.getPropertyValue("--developer-dock-right-bottom")) || 82;
+    const viewportWidth = document.documentElement?.clientWidth || window.innerWidth;
+    const viewportHeight = document.documentElement?.clientHeight || window.innerHeight;
+    const x = side === "left" ? 18 : Math.max(18, viewportWidth - 18 - width);
+    const bottom = side === "left" ? leftBottom : rightBottom;
+    const y = Math.max(18, viewportHeight - bottom - height);
+    return { left: x, top: y };
+  }
+
+  function finalizeDeveloperDock(side) {
+    state.devDockSide = side;
+    persist();
+    destroyDeveloperDragGhost();
+    clearDeveloperDockPreview();
+    applyPrivacyState();
+  }
+
+  function startDeveloperDrag(event) {
+    if (!els.developerFabBtn || !els.developerFab) return false;
+    const sourceRect = els.developerFabBtn.getBoundingClientRect();
+    developerDragOffsetX = event.clientX - sourceRect.left;
+    developerDragOffsetY = event.clientY - sourceRect.top;
+    createDeveloperDragGhost(sourceRect);
+    els.developerFab.classList.add("ghosting");
+    setDeveloperMenuOpen(false);
+    setDeveloperDragGhostPosition(event.clientX - developerDragOffsetX, event.clientY - developerDragOffsetY);
+    return true;
+  }
+
+  function animateDeveloperDockSnap(side) {
+    if (!developerDragGhost) {
+      finalizeDeveloperDock(side);
+      return;
+    }
+    const currentRect = developerDragGhost.getBoundingClientRect();
+    const target = getDeveloperDockTargetPosition(side, currentRect.width, currentRect.height);
+    const distance = Math.hypot(target.left - currentRect.left, target.top - currentRect.top);
+    if (distance < 4) {
+      finalizeDeveloperDock(side);
+      return;
+    }
+    developerDragGhost.classList.add("snapping");
+    const finish = () => {
+      developerDragGhost?.removeEventListener("transitionend", finish);
+      finalizeDeveloperDock(side);
+    };
+    developerDragGhost.addEventListener("transitionend", finish, { once: true });
+    requestAnimationFrame(() => {
+      setDeveloperDragGhostPosition(target.left, target.top);
+    });
+    developerDragCleanupTimer = window.setTimeout(finish, 820);
   }
 
   async function resetDeveloperStorage() {
@@ -7756,6 +8572,7 @@ function initPrivacyControls(state, persist) {
     els.developerTrackerAlertBtn?.classList.toggle("active", Boolean(state.devTrackerAlertEnabled));
     els.developerTrackerAlertBtn?.setAttribute("aria-pressed", state.devTrackerAlertEnabled ? "true" : "false");
     els.developerFab?.classList.toggle("hidden", !isDevModeVisible);
+    applyDeveloperDockSide();
     els.lockOverlay.classList.toggle("open", Boolean(isLocked));
     els.lockOverlay.setAttribute("aria-hidden", String(!isLocked));
     if (state.privacyMode && !state.privacyModeActivated) {
@@ -7809,14 +8626,25 @@ function initPrivacyControls(state, persist) {
     applyPrivacyState();
   }
 
-  els.toggleBtn.addEventListener("click", () => {
+  function togglePrivacyMode(options = {}) {
     state.privacyMode = !state.privacyMode;
     if (state.privacyMode) {
       markPrivacyActivated();
     }
     persist();
     applyPrivacyState();
-    setMenuOpen(false);
+    showGlobalToast(
+      state.privacyMode ? "프라이버시 모드를 켰어요." : "프라이버시 모드를 껐어요.",
+      "default",
+      2200
+    );
+    if (options.closeMenu !== false) {
+      setMenuOpen(false);
+    }
+  }
+
+  els.toggleBtn.addEventListener("click", () => {
+    togglePrivacyMode();
   });
 
   els.fabBtn.addEventListener("click", () => {
@@ -7824,8 +8652,64 @@ function initPrivacyControls(state, persist) {
     setMenuOpen(!isMenuOpen);
   });
   els.developerFabBtn?.addEventListener("click", () => {
+    if (suppressDeveloperClick) {
+      suppressDeveloperClick = false;
+      return;
+    }
+    if (developerDragMoved) {
+      developerDragMoved = false;
+      return;
+    }
     setMenuOpen(false);
     setDeveloperMenuOpen(!isDeveloperMenuOpen);
+  });
+  els.developerFabBtn?.addEventListener("pointerdown", (event) => {
+    developerDragPointerId = event.pointerId;
+    developerDragStartX = event.clientX;
+    developerDragStartY = event.clientY;
+    developerDragMoved = false;
+    els.developerFabBtn?.setPointerCapture?.(event.pointerId);
+  });
+  els.developerFabBtn?.addEventListener("pointermove", (event) => {
+    if (developerDragPointerId !== event.pointerId) return;
+    const deltaX = event.clientX - developerDragStartX;
+    const deltaY = event.clientY - developerDragStartY;
+    if (!developerDragMoved && Math.hypot(deltaX, deltaY) > 4) {
+      developerDragMoved = true;
+      startDeveloperDrag(event);
+    }
+    if (!developerDragMoved) return;
+    setDeveloperDragGhostPosition(event.clientX - developerDragOffsetX, event.clientY - developerDragOffsetY);
+    const previewLeft = event.clientX < (window.innerWidth / 2);
+    const previewSide = previewLeft ? "left" : "right";
+    setDeveloperDockPreview(previewSide);
+  });
+  els.developerFabBtn?.addEventListener("pointerup", (event) => {
+    if (developerDragPointerId !== event.pointerId) return;
+    els.developerFabBtn?.releasePointerCapture?.(event.pointerId);
+    developerDragPointerId = null;
+    if (!developerDragMoved) {
+      clearDeveloperDockPreview();
+      return;
+    }
+    suppressDeveloperClick = true;
+    const nextSide = event.clientX < (window.innerWidth / 2) ? "left" : "right";
+    setDeveloperDockPreview(nextSide);
+    animateDeveloperDockSnap(nextSide);
+    showGlobalToast(
+      nextSide === "left" ? "DEV 버튼을 왼쪽에 고정했어요." : "DEV 버튼을 오른쪽에 고정했어요.",
+      "default",
+      1800
+    );
+    developerDragMoved = false;
+  });
+  els.developerFabBtn?.addEventListener("pointercancel", (event) => {
+    if (developerDragPointerId !== event.pointerId) return;
+    developerDragPointerId = null;
+    developerDragMoved = false;
+    destroyDeveloperDragGhost();
+    clearDeveloperDockPreview();
+    applyPrivacyState();
   });
   els.developerGpsBtn?.addEventListener("click", () => {
     state.devGpsDisabled = !state.devGpsDisabled;
@@ -7921,12 +8805,7 @@ function initPrivacyControls(state, persist) {
   document.addEventListener("keydown", (event) => {
     if (event.ctrlKey && event.shiftKey && event.key.toLowerCase() === "b") {
       event.preventDefault();
-      state.privacyMode = !state.privacyMode;
-      if (state.privacyMode) {
-        markPrivacyActivated();
-      }
-      persist();
-      applyPrivacyState();
+      togglePrivacyMode({ closeMenu: false });
       return;
     }
     if (event.ctrlKey && event.shiftKey && event.key.toLowerCase() === "l") {
@@ -8037,8 +8916,7 @@ async function bootstrap() {
   const host = document.getElementById("tabHost");
   await storageReady;
   initHeroZodiacMark();
-  placeGlobalLunchAlertNearTitle();
-  moveHomeGuideButtonToTabBar();
+  ensureGlobalHeaderLayout();
   initHomeGuide();
   initPrivacyControls(state, persist);
   const tabs = await loadTabs(host, tabConfigs, { state, persist });
@@ -8060,6 +8938,7 @@ async function bootstrap() {
   persist();
   setActiveTab(tabs, initialTab);
   initWeatherWidget();
+  document.body.classList.add("app-ready");
 }
 
 bootstrap().catch((error) => {
@@ -8070,6 +8949,7 @@ bootstrap().catch((error) => {
       <p class="hint">파일 경로와 스크립트 구성을 다시 확인해 주세요.</p>
     </section>
   `;
+  document.body.classList.add("app-ready");
 });
 
 })();

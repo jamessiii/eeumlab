@@ -57,12 +57,11 @@
   <div class="app-shell">
     <header class="hero">
       <div class="hero-copy">
-        <h1><span id="heroMark" class="hero-mark">🐴</span> 직딩심체요절</h1>
-        <p>10분만 딴짓해도 손해 계산은 정직하게.</p>
-        <div class="hero-actions">
-          <span id="globalLunchAlert" class="global-lunch-alert" hidden>점심시간 임박!!</span>
-          <button id="setHomeGuideBtn" type="button" class="hero-home-btn">이 페이지를 홈으로 쓰기</button>
+        <div class="hero-title-row">
+          <h1><span id="heroMark" class="hero-mark">🐴</span> 직딩심체요절</h1>
+          <div id="heroAlertHost" class="hero-title-badges"></div>
         </div>
+        <p>10분만 딴짓해도 손해 계산은 정직하게.</p>
       </div>
       <aside id="weatherWidget" class="weather-widget" aria-live="polite">
         <div class="weather-widget-text">
@@ -71,7 +70,7 @@
           <div id="weatherUpdatedAt" class="weather-updated-at"></div>
         </div>
         <div class="weather-widget-visual">
-          <img id="weatherIcon" class="weather-icon" alt="" />
+          <img id="weatherIcon" class="weather-icon empty" alt="" hidden />
           <div id="weatherTemp" class="weather-temp">--°</div>
           <button id="weatherRefreshBtn" type="button" class="weather-refresh-btn" aria-label="날씨 새로고침">↻</button>
         </div>
@@ -84,11 +83,15 @@
         <span class="tracker-tab-label tracker-tab-label-hover">월루생활</span>
       </button>
       <button class="tab-btn" data-tab="income">실수령액표</button>
+      <button class="tab-btn" data-tab="market">시장</button>
       <button class="tab-btn" data-tab="bookmarks">북마크</button>
       <button class="tab-btn" data-tab="todo">오늘 할 일</button>
       <button class="tab-btn" data-tab="lunch">점메추</button>
       <button class="tab-btn" data-tab="fortune">오늘의 운세</button>
       <button class="tab-btn" data-tab="ladder">사다리게임</button>
+      <div id="tabBarActions" class="tab-bar-actions">
+        <button id="setHomeGuideBtn" type="button" class="hero-home-btn tab-home-btn">이 페이지를 홈으로 쓰기</button>
+      </div>
     </nav>
 
     <main id="tabHost" class="page"></main>

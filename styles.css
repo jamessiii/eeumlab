@@ -66,12 +66,59 @@ button, input, select, textarea {
   position: fixed;
   right: 18px;
   bottom: 82px;
+  --developer-dock-right-bottom: 82px;
+  --developer-dock-left-bottom: 18px;
   z-index: 121;
   display: flex;
   flex-direction: column;
   align-items: flex-end;
   gap: 8px;
   transition: transform 0.24s ease;
+  will-change: transform;
+}
+
+.developer-dock-ghost {
+  position: fixed;
+  bottom: var(--developer-dock-right-bottom);
+  width: 50px;
+  height: 50px;
+  border-radius: 999px;
+  border: 1px dashed rgba(250, 204, 21, 0.42);
+  background: rgba(250, 204, 21, 0.12);
+  box-shadow: 0 0 0 1px rgba(250, 204, 21, 0.14), 0 0 24px rgba(250, 204, 21, 0.18);
+  opacity: 0;
+  pointer-events: none;
+  transition: opacity 0.18s ease, transform 0.18s ease, box-shadow 0.18s ease;
+  z-index: 119;
+}
+
+.developer-dock-ghost.open {
+  opacity: 1;
+  animation: developer-dock-ghost-pulse 1s ease-in-out infinite;
+}
+
+.developer-dock-ghost.dock-left {
+  left: 18px;
+  bottom: var(--developer-dock-left-bottom);
+}
+
+.developer-dock-ghost.dock-right {
+  right: 18px;
+  bottom: var(--developer-dock-right-bottom);
+}
+
+.developer-fab.dock-left {
+  left: 18px;
+  right: auto;
+  bottom: var(--developer-dock-left-bottom);
+  align-items: flex-start;
+}
+
+.developer-fab.dock-right {
+  left: auto;
+  right: 18px;
+  bottom: var(--developer-dock-right-bottom);
+  align-items: flex-end;
 }
 
 .developer-fab.hidden {
@@ -84,7 +131,62 @@ button, input, select, textarea {
   transform: translateY(-138px);
 }
 
+.developer-fab.dragging {
+  transform: translate(var(--dev-drag-x, 0), var(--dev-drag-y, 0));
+  transition: none;
+}
+
+.developer-fab.ghosting {
+  visibility: hidden;
+  pointer-events: none;
+}
+
+.developer-fab.dragging .developer-fab-btn {
+  transform: scale(1.06);
+  box-shadow: 0 22px 40px rgba(2, 6, 23, 0.34);
+  transition: none;
+}
+
+.developer-dock-flyer {
+  position: fixed;
+  z-index: 122;
+  border-radius: 999px;
+  border: 1px solid rgba(148, 163, 184, 0.18);
+  background: rgba(15, 23, 42, 0.94);
+  color: #cbd5e1;
+  box-shadow: 0 16px 34px rgba(2, 6, 23, 0.28);
+  backdrop-filter: blur(14px);
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  font-size: 11px;
+  font-weight: 900;
+  letter-spacing: 0.06em;
+  pointer-events: none;
+  will-change: left, top, opacity;
+}
+
+.developer-dock-flyer.snapping {
+  transition: left 0.75s cubic-bezier(0.22, 1, 0.36, 1), top 0.75s cubic-bezier(0.22, 1, 0.36, 1);
+}
+
+@keyframes developer-dock-ghost-pulse {
+  0%,
+  100% {
+    transform: scale(1);
+    background: rgba(250, 204, 21, 0.12);
+  }
+
+  50% {
+    transform: scale(1.08);
+    background: rgba(250, 204, 21, 0.2);
+  }
+}
+
 .developer-fab-menu {
+  position: absolute;
+  right: 0;
+  bottom: 62px;
   display: flex;
   flex-direction: column;
   align-items: flex-end;
@@ -96,8 +198,16 @@ button, input, select, textarea {
   transition: opacity 0.2s ease, transform 0.24s ease;
 }
 
+.developer-fab.dock-left .developer-fab-menu {
+  left: 0;
+  right: auto;
+  align-items: flex-start;
+  transform-origin: bottom left;
+}
+
 .developer-meta {
-  max-width: 230px;
+  width: 320px;
+  max-width: min(320px, calc(100vw - 40px));
   padding: 10px 12px;
   border-radius: 14px;
   border: 1px solid rgba(148, 163, 184, 0.14);
@@ -107,11 +217,22 @@ button, input, select, textarea {
   font-weight: 700;
   line-height: 1.45;
   text-align: right;
+  pointer-events: none;
+}
+
+.developer-fab.dock-left .developer-meta {
+  text-align: left;
 }
 
 .developer-fab.open .developer-fab-menu {
   opacity: 1;
   transform: translateY(0) scale(1);
+  pointer-events: none;
+}
+
+.developer-fab.open .developer-fab-menu .privacy-fab-action,
+.developer-fab.open .developer-fab-menu .developer-fab-action,
+.developer-fab.open .developer-fab-menu .developer-fab-btn {
   pointer-events: auto;
 }
 
@@ -130,6 +251,7 @@ button, input, select, textarea {
   cursor: pointer;
   padding: 0;
   transition: transform 0.18s ease, border-color 0.18s ease, background 0.18s ease, color 0.18s ease;
+  touch-action: none;
 }
 
 .developer-fab-btn:hover,
@@ -289,17 +411,23 @@ button, input, select, textarea {
 .privacy-lock-overlay {
   position: fixed;
   inset: 0;
-  display: none;
+  display: flex;
   align-items: center;
   justify-content: center;
   padding: 20px;
   background: rgba(2, 6, 23, 0.72);
   z-index: 130;
+  opacity: 0;
+  visibility: hidden;
+  pointer-events: none;
+  transition: opacity 0.22s ease, visibility 0.22s ease;
 }
 
 .privacy-modal.open,
 .privacy-lock-overlay.open {
-  display: flex;
+  opacity: 1;
+  visibility: visible;
+  pointer-events: auto;
 }
 
 .privacy-modal-panel,
@@ -310,6 +438,15 @@ button, input, select, textarea {
   border: 1px solid rgba(148, 163, 184, 0.16);
   background: rgba(15, 23, 42, 0.96);
   box-shadow: 0 22px 60px rgba(2, 6, 23, 0.42);
+  opacity: 0;
+  transform: translateY(18px) scale(0.97);
+  transition: opacity 0.28s cubic-bezier(0.22, 1, 0.36, 1), transform 0.28s cubic-bezier(0.22, 1, 0.36, 1);
+}
+
+.privacy-modal.open .privacy-modal-panel,
+.privacy-lock-overlay.open .privacy-lock-panel {
+  opacity: 1;
+  transform: translateY(0) scale(1);
 }
 
 .privacy-modal-kicker {
@@ -401,12 +538,27 @@ button, input, select, textarea {
   min-width: 0;
 }
 
-.hero-actions {
-  margin-top: 14px;
+.hero-title-row {
   display: flex;
   align-items: center;
   gap: 10px;
   flex-wrap: wrap;
+}
+
+.hero-title-row h1 {
+  margin: 0;
+}
+
+.hero-title-badges {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  flex-wrap: wrap;
+  min-height: 34px;
+  opacity: 0;
+  visibility: hidden;
+  pointer-events: none;
+  transition: opacity 0.18s ease;
 }
 
 .hero-home-btn {
@@ -553,6 +705,10 @@ button, input, select, textarea {
   object-fit: contain;
 }
 
+.weather-icon.empty {
+  display: none;
+}
+
 .weather-temp {
   font-size: 28px;
   font-weight: 900;
@@ -638,16 +794,22 @@ button, input, select, textarea {
 .home-guide-modal {
   position: fixed;
   inset: 0;
-  display: none;
+  display: flex;
   align-items: center;
   justify-content: center;
   padding: 20px;
   background: rgba(2, 6, 23, 0.76);
   z-index: 70;
+  opacity: 0;
+  visibility: hidden;
+  pointer-events: none;
+  transition: opacity 0.22s ease, visibility 0.22s ease;
 }
 
 .home-guide-modal.open {
-  display: flex;
+  opacity: 1;
+  visibility: visible;
+  pointer-events: auto;
 }
 
 .home-guide-panel {
@@ -660,6 +822,14 @@ button, input, select, textarea {
     rgba(15, 23, 42, 0.98);
   box-shadow: 0 24px 60px rgba(0, 0, 0, 0.42);
   padding: 26px;
+  opacity: 0;
+  transform: translateY(18px) scale(0.97);
+  transition: opacity 0.28s cubic-bezier(0.22, 1, 0.36, 1), transform 0.28s cubic-bezier(0.22, 1, 0.36, 1);
+}
+
+.home-guide-modal.open .home-guide-panel {
+  opacity: 1;
+  transform: translateY(0) scale(1);
 }
 
 .home-guide-close {
@@ -751,7 +921,7 @@ button, input, select, textarea {
   align-items: center;
 }
 
-.hero-actions,
+.hero-title-badges,
 .todo-header-actions,
 .lunch-actions,
 .bookmarks-header-actions,
@@ -759,8 +929,27 @@ button, input, select, textarea {
   flex-wrap: wrap;
 }
 
-.tab-home-btn {
+.tab-bar-actions {
   margin-left: auto;
+  display: flex;
+  align-items: center;
+  justify-content: flex-end;
+  flex-wrap: wrap;
+  gap: 10px;
+  opacity: 0;
+  visibility: hidden;
+  pointer-events: none;
+  transition: opacity 0.18s ease;
+}
+
+body.app-ready .hero-title-badges,
+body.app-ready .tab-bar-actions {
+  opacity: 1;
+  visibility: visible;
+  pointer-events: auto;
+}
+
+.tab-home-btn {
   white-space: nowrap;
 }
 
@@ -1611,6 +1800,145 @@ td.date-sunday {
 .income-table td.highlight {
   background: rgba(191, 219, 254, 0.78) !important;
   font-weight: 900;
+}
+
+/* Market */
+.market-card {
+  display: grid;
+  gap: 18px;
+}
+
+.market-header {
+  display: flex;
+  justify-content: space-between;
+  align-items: flex-start;
+  gap: 16px;
+}
+
+.market-header-actions {
+  display: flex;
+  justify-content: flex-end;
+  align-items: center;
+  gap: 10px;
+}
+
+.market-status {
+  border: 1px solid rgba(148, 163, 184, 0.16);
+  border-radius: 16px;
+  padding: 12px 14px;
+  font-weight: 700;
+  color: #cbd5e1;
+  background: rgba(15, 23, 42, 0.42);
+}
+
+.market-status[data-tone="loading"] {
+  color: #bfdbfe;
+  border-color: rgba(96, 165, 250, 0.3);
+}
+
+.market-status[data-tone="success"] {
+  color: #dbeafe;
+}
+
+.market-status[data-tone="error"] {
+  color: #fecaca;
+  border-color: rgba(248, 113, 113, 0.24);
+}
+
+.market-rate-grid {
+  display: grid;
+  grid-template-columns: repeat(3, minmax(0, 1fr));
+  gap: 14px;
+}
+
+.market-rate-card {
+  border-radius: 22px;
+  padding: 18px;
+  border: 1px solid rgba(148, 163, 184, 0.16);
+  background: linear-gradient(180deg, rgba(15, 23, 42, 0.92), rgba(15, 23, 42, 0.68));
+  display: grid;
+  gap: 8px;
+}
+
+.market-rate-card-blue {
+  box-shadow: inset 0 0 0 1px rgba(96, 165, 250, 0.12);
+}
+
+.market-rate-card-emerald {
+  box-shadow: inset 0 0 0 1px rgba(45, 212, 191, 0.12);
+}
+
+.market-rate-card-amber {
+  box-shadow: inset 0 0 0 1px rgba(250, 204, 21, 0.12);
+}
+
+.market-rate-label {
+  font-size: 13px;
+  color: #94a3b8;
+  font-weight: 700;
+}
+
+.market-rate-value {
+  font-size: clamp(22px, 3vw, 32px);
+  font-weight: 900;
+  color: #f8fafc;
+  letter-spacing: -0.03em;
+}
+
+.market-rate-value span {
+  font-size: 15px;
+  color: #94a3b8;
+  font-weight: 700;
+}
+
+.market-rate-unit {
+  font-size: 12px;
+  color: #64748b;
+  font-weight: 700;
+}
+
+.market-widget-grid {
+  display: grid;
+  grid-template-columns: minmax(0, 1.45fr) minmax(320px, 0.95fr);
+  gap: 16px;
+}
+
+.market-widget-card {
+  border-radius: 24px;
+  padding: 18px;
+  border: 1px solid rgba(148, 163, 184, 0.14);
+  background: rgba(15, 23, 42, 0.44);
+  display: grid;
+  gap: 14px;
+}
+
+.market-widget-header {
+  display: flex;
+  align-items: flex-start;
+  justify-content: space-between;
+  gap: 12px;
+}
+
+.market-widget-header h3 {
+  margin: 0;
+  font-size: 20px;
+}
+
+.market-widget-frame {
+  min-height: 460px;
+  border-radius: 18px;
+  overflow: hidden;
+  background: rgba(2, 6, 23, 0.72);
+}
+
+.market-widget-frame-compact {
+  min-height: 460px;
+}
+
+.tradingview-widget-container,
+.tradingview-widget-container__widget {
+  width: 100%;
+  min-height: inherit;
 }
 
 @keyframes income-table-enter {
@@ -2509,7 +2837,14 @@ td.date-sunday {
   border-radius: 12px;
   background: rgba(255, 255, 255, 0.96);
   border: 1px solid rgba(148, 163, 184, 0.18);
-  padding: 7px;
+  padding: 4px;
+}
+
+.bookmark-favicon-preset {
+  object-fit: contain;
+  background: transparent;
+  border: none;
+  padding: 0;
 }
 
 .bookmark-media.loaded .bookmark-favicon {
@@ -2816,31 +3151,43 @@ td.date-sunday {
 .bookmark-modal {
   position: fixed;
   inset: 0;
-  display: none;
+  display: flex;
   align-items: center;
   justify-content: center;
   padding: 20px;
   background: rgba(2, 6, 23, 0.76);
   z-index: 70;
+  opacity: 0;
+  visibility: hidden;
+  pointer-events: none;
+  transition: opacity 0.22s ease, visibility 0.22s ease;
 }
 
 .bookmark-modal.open {
-  display: flex;
+  opacity: 1;
+  visibility: visible;
+  pointer-events: auto;
 }
 
 .bookmark-delete-confirm-modal {
   position: fixed;
   inset: 0;
-  display: none;
+  display: flex;
   align-items: center;
   justify-content: center;
   padding: 20px;
   background: rgba(2, 6, 23, 0.76);
   z-index: 72;
+  opacity: 0;
+  visibility: hidden;
+  pointer-events: none;
+  transition: opacity 0.22s ease, visibility 0.22s ease;
 }
 
 .bookmark-delete-confirm-modal.open {
-  display: flex;
+  opacity: 1;
+  visibility: visible;
+  pointer-events: auto;
 }
 
 .bookmark-delete-confirm-panel {
@@ -2853,6 +3200,9 @@ td.date-sunday {
   box-shadow: 0 24px 60px rgba(0, 0, 0, 0.42);
   padding: 24px;
   text-align: center;
+  opacity: 0;
+  transform: translateY(18px) scale(0.97);
+  transition: opacity 0.28s cubic-bezier(0.22, 1, 0.36, 1), transform 0.28s cubic-bezier(0.22, 1, 0.36, 1);
 }
 
 .bookmark-delete-confirm-title {
@@ -2878,6 +3228,15 @@ td.date-sunday {
     rgba(15, 23, 42, 0.98);
   box-shadow: 0 24px 60px rgba(0, 0, 0, 0.42);
   padding: 24px;
+  opacity: 0;
+  transform: translateY(18px) scale(0.97);
+  transition: opacity 0.28s cubic-bezier(0.22, 1, 0.36, 1), transform 0.28s cubic-bezier(0.22, 1, 0.36, 1);
+}
+
+.bookmark-modal.open .bookmark-modal-panel,
+.bookmark-delete-confirm-modal.open .bookmark-delete-confirm-panel {
+  opacity: 1;
+  transform: translateY(0) scale(1);
 }
 
 .bookmark-modal-close {
@@ -3926,16 +4285,22 @@ td.date-sunday {
   position: fixed;
   inset: 0;
   z-index: 72;
-  display: none;
+  display: flex;
   align-items: center;
   justify-content: center;
   padding: 20px;
   background: rgba(2, 6, 23, 0.72);
   backdrop-filter: blur(8px);
+  opacity: 0;
+  visibility: hidden;
+  pointer-events: none;
+  transition: opacity 0.22s ease, visibility 0.22s ease;
 }
 
 .todo-modal.open {
-  display: flex;
+  opacity: 1;
+  visibility: visible;
+  pointer-events: auto;
 }
 
 .todo-modal-panel {
@@ -3947,6 +4312,14 @@ td.date-sunday {
     radial-gradient(circle at top, rgba(56, 189, 248, 0.12), transparent 42%),
     rgba(15, 23, 42, 0.98);
   padding: 26px;
+  opacity: 0;
+  transform: translateY(18px) scale(0.97);
+  transition: opacity 0.28s cubic-bezier(0.22, 1, 0.36, 1), transform 0.28s cubic-bezier(0.22, 1, 0.36, 1);
+}
+
+.todo-modal.open .todo-modal-panel {
+  opacity: 1;
+  transform: translateY(0) scale(1);
 }
 
 .todo-modal-close {
@@ -4318,16 +4691,22 @@ td.date-sunday {
   position: fixed;
   inset: 0;
   z-index: 70;
-  display: none;
+  display: flex;
   align-items: center;
   justify-content: center;
   padding: 20px;
   background: rgba(2, 6, 23, 0.74);
   backdrop-filter: blur(8px);
+  opacity: 0;
+  visibility: hidden;
+  pointer-events: none;
+  transition: opacity 0.22s ease, visibility 0.22s ease;
 }
 
 .lunch-draw-modal.open {
-  display: flex;
+  opacity: 1;
+  visibility: visible;
+  pointer-events: auto;
 }
 
 .lunch-draw-panel {
@@ -4340,6 +4719,14 @@ td.date-sunday {
     rgba(15, 23, 42, 0.97);
   box-shadow: 0 28px 80px rgba(2, 6, 23, 0.42);
   padding: 28px;
+  opacity: 0;
+  transform: translateY(18px) scale(0.97);
+  transition: opacity 0.28s cubic-bezier(0.22, 1, 0.36, 1), transform 0.28s cubic-bezier(0.22, 1, 0.36, 1);
+}
+
+.lunch-draw-modal.open .lunch-draw-panel {
+  opacity: 1;
+  transform: translateY(0) scale(1);
 }
 
 .lunch-draw-close {
@@ -4460,16 +4847,22 @@ td.date-sunday {
 .tracker-confirm-modal {
   position: fixed;
   inset: 0;
-  display: none;
+  display: flex;
   align-items: center;
   justify-content: center;
   padding: 20px;
   background: rgba(2, 6, 23, 0.72);
   z-index: 60;
+  opacity: 0;
+  visibility: hidden;
+  pointer-events: none;
+  transition: opacity 0.22s ease, visibility 0.22s ease;
 }
 
 .tracker-confirm-modal.open {
-  display: flex;
+  opacity: 1;
+  visibility: visible;
+  pointer-events: auto;
 }
 
 .tracker-confirm-panel {
@@ -4481,6 +4874,14 @@ td.date-sunday {
     rgba(15, 23, 42, 0.96);
   padding: 24px;
   text-align: center;
+  opacity: 0;
+  transform: translateY(18px) scale(0.97);
+  transition: opacity 0.28s cubic-bezier(0.22, 1, 0.36, 1), transform 0.28s cubic-bezier(0.22, 1, 0.36, 1);
+}
+
+.tracker-confirm-modal.open .tracker-confirm-panel {
+  opacity: 1;
+  transform: translateY(0) scale(1);
 }
 
 .tracker-confirm-kicker {
@@ -5544,7 +5945,8 @@ td.date-sunday {
   .bookmarks-header-actions,
   .todo-header-actions,
   .lunch-actions,
-  .hero-actions,
+  .hero-title-badges,
+  .tab-bar-actions,
   .bookmark-group-create,
   .todo-calendar-nav {
     width: 100%;
@@ -5891,15 +6293,32 @@ td.date-sunday {
   }
 
   .bookmark-group-list,
-  .lunch-list {
+  .lunch-list,
+  .market-rate-grid,
+  .market-widget-grid {
     grid-template-columns: 1fr;
   }
 
   .bookmarks-header-actions,
   .todo-header-actions,
   .lunch-actions,
-  .bookmark-group-create {
+  .bookmark-group-create,
+  .market-header-actions {
     gap: 8px;
+  }
+
+  .market-header {
+    display: grid;
+    grid-template-columns: 1fr;
+  }
+
+  .market-header-actions .btn {
+    width: 100%;
+  }
+
+  .market-widget-frame,
+  .market-widget-frame-compact {
+    min-height: 420px;
   }
 
   .bookmarks-view-toggle,
