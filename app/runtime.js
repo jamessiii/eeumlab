@@ -5086,6 +5086,7 @@ out center tags;
     if (els.savedLocationBtn) {
       els.savedLocationBtn.textContent = "위치 관리";
       els.savedLocationBtn.title = presets.length ? "저장된 위치를 관리해요." : "집, 회사, 본가 같은 위치를 저장해요.";
+      els.savedLocationBtn.disabled = false;
     }
     if (els.savedLocationDeleteBtn) {
       els.savedLocationDeleteBtn.hidden = !editingSavedLocationId;
