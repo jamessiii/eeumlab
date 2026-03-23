@@ -1,5 +1,5 @@
 <svg xmlns="http://www.w3.org/2000/svg" width="1200" height="630" viewBox="0 0 1200 630" role="img" aria-labelledby="title desc">
-  <title id="title">직딩심체요절</title>
+  <title id="title">이음 Lab</title>
   <desc id="desc">월급 계산, 점메추, 오늘 할 일, 북마크, 운세, 사다리게임 기능을 제공하는 직장인 대시보드</desc>
   <defs>
     <linearGradient id="bg" x1="0" y1="0" x2="1" y2="1">
@@ -15,10 +15,10 @@
   <circle cx="1030" cy="120" r="120" fill="#1d4ed8" opacity="0.18" />
   <circle cx="120" cy="560" r="160" fill="#14b8a6" opacity="0.12" />
   <rect x="70" y="70" width="1060" height="490" rx="32" fill="#0b1220" stroke="#334155" stroke-width="2" />
-  <text x="120" y="200" fill="#f8fafc" font-size="72" font-weight="800" font-family="Pretendard, Apple SD Gothic Neo, Malgun Gothic, sans-serif">직딩심체요절</text>
+  <text x="120" y="200" fill="#f8fafc" font-size="72" font-weight="800" font-family="Pretendard, Apple SD Gothic Neo, Malgun Gothic, sans-serif">이음 Lab</text>
   <text x="120" y="270" fill="#cbd5e1" font-size="30" font-weight="500" font-family="Pretendard, Apple SD Gothic Neo, Malgun Gothic, sans-serif">직장인을 위한 올인원 업무 보조 대시보드</text>
   <text x="120" y="360" fill="url(#accent)" font-size="28" font-weight="700" font-family="Pretendard, Apple SD Gothic Neo, Malgun Gothic, sans-serif">월급 계산  ·  점메추  ·  오늘 할 일  ·  북마크</text>
   <text x="120" y="415" fill="#94a3b8" font-size="26" font-weight="600" font-family="Pretendard, Apple SD Gothic Neo, Malgun Gothic, sans-serif">운세  ·  사다리게임  ·  일정 캘린더</text>
   <rect x="120" y="465" width="320" height="54" rx="27" fill="#1d4ed8" opacity="0.25" />
-  <text x="150" y="500" fill="#e0f2fe" font-size="24" font-weight="700" font-family="Pretendard, Apple SD Gothic Neo, Malgun Gothic, sans-serif">office-lab dashboard</text>
+  <text x="150" y="500" fill="#e0f2fe" font-size="24" font-weight="700" font-family="Pretendard, Apple SD Gothic Neo, Malgun Gothic, sans-serif">이음 Lab dashboard</text>
 </svg>
