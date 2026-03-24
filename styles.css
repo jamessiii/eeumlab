@@ -535,6 +535,12 @@ button, input, select, textarea {
   display: block;
   width: 54px;
   height: auto;
+  filter: brightness(0) invert(1);
+}
+
+.hero-mark-integrated img {
+  width: 152px;
+  max-width: min(290px, 42vw);
 }
 
 .hero-mark:active {
@@ -546,10 +552,6 @@ button, input, select, textarea {
   align-items: flex-end;
   gap: 10px;
   min-width: 0;
-}
-
-.hero-title-main {
-  display: block;
 }
 
 .hero-title-subtitle {
@@ -6268,6 +6270,11 @@ td.date-sunday {
     width: 46px;
   }
 
+  .hero-mark-integrated img {
+    width: 142px;
+    max-width: min(258px, 46vw);
+  }
+
   .hero-title-copy {
     gap: 8px;
   }
@@ -6381,6 +6388,11 @@ td.date-sunday {
 
   .hero-mark img {
     width: 42px;
+  }
+
+  .hero-mark-integrated img {
+    width: 128px;
+    max-width: min(220px, 50vw);
   }
 
   .hero-title-copy {
